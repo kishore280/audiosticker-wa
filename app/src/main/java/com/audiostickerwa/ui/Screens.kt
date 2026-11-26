@@ -73,7 +73,7 @@ fun PackListContent(
                 Column(Modifier.padding(16.dp)) {
                     Text("Audio sticker studio", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "Make stickers with sound from video, GIF, image + audio. Opens WhatsApp Web inside the app.",
+                        "Make stickers with sound from a video, GIF or image + audio, and send them to any chat.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
