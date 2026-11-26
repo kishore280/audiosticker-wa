@@ -16,7 +16,16 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew --no-daemon assembleDebug
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: engine/go.sum
+      # Engine for arm64 + x86_64: the x86_64 emulator then runs it natively (the Go runtime crashes under ARM translation).
+      - name: Build engine (arm64 + x86_64)
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME"
+          TARGETS=android/arm64,android/amd64 bash engine/build.sh
+      - run: ./gradlew --no-daemon assembleDebug -PextraAbis=x86_64
 
       - name: Enable KVM
         run: |

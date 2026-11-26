@@ -15,6 +15,8 @@ cp go.mod go.mod.bak && cp go.sum go.sum.bak
 trap 'mv go.mod.bak go.mod; mv go.sum.bak go.sum' EXIT
 go mod edit -replace go.mau.fi/whatsmeow=./build/whatsmeow
 # arm64 only: almost all phones since ~2017. Add ",android/arm" for old 32-bit phones (+~19 MB).
-gomobile bind -target android/arm64 -androidapi 24 -trimpath -javapkg com.kish.wastickers \
+# The demo-video workflow sets TARGETS=android/arm64,android/amd64 (x86_64 emulator, no ARM translation).
+TARGETS="${TARGETS:-android/arm64}"
+gomobile bind -target "$TARGETS" -androidapi 24 -trimpath -javapkg com.kish.wastickers \
   -ldflags "-s -w" -o ../app/libs/waengine.aar .
 echo "Built app/libs/waengine.aar"

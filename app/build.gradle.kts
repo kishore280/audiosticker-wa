@@ -53,8 +53,14 @@ android {
     }
     // Compress the Go engine library in the APK (~19 MB -> ~7 MB download); Android unpacks it at install.
     packaging { jniLibs { useLegacyPackaging = true } }
-    // The Go engine is arm64 only (see engine/build.sh).
-    defaultConfig { ndk { abiFilters += listOf("arm64-v8a") } }
+    // The Go engine is arm64 only (see engine/build.sh). The demo-video workflow adds x86_64 with
+    // -PextraAbis=x86_64 (after it builds the engine for x86_64 too).
+    defaultConfig {
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+            (project.findProperty("extraAbis") as String?)?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() }?.let { abiFilters += it }
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

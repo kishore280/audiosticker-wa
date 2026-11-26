@@ -7,6 +7,8 @@ OUT=demo-out
 mkdir -p "$OUT"
 adb wait-for-device
 adb install -r -g app/build/outputs/apk/debug/app-debug.apk
+# Full log for the whole run (crash reasons), in the background.
+adb logcat -c; adb logcat -v time > "$OUT/logcat-full.txt" 2>/dev/null &
 
 # Clean look: dark mode, visible touches, demo status bar (9:41, full battery, no notifications).
 adb shell cmd uimode night yes
@@ -19,7 +21,7 @@ done
 
 rec()  { adb shell screenrecord --bit-rate 16000000 --time-limit 178 "/sdcard/$1.mp4" & sleep 2; }
 stop() { adb shell pkill -INT screenrecord || true; sleep 3; adb pull "/sdcard/$1.mp4" "$OUT/" || true; }
-flow() { maestro test --no-ansi ".maestro/$1.yaml" || echo "FLOW FAILED: $1" | tee -a "$OUT/failures.txt"; }
+flow() { maestro test --no-ansi --debug-output "$OUT/maestro-$1" ".maestro/$1.yaml" || echo "FLOW FAILED: $1" | tee -a "$OUT/failures.txt"; }
 D=/sdcard/Android/data/$PKG/files
 media() { adb shell mkdir -p "$D"; adb push docs/demo/beach_party.mp4 docs/demo/dance.gif docs/demo/sunny.png "$D/"; }
 # Share a file to the app, like "Share" from a gallery app.
@@ -51,6 +53,7 @@ rec seg3
 flow 06-settings
 stop seg3
 
-adb logcat -d -t 2000 > "$OUT/logcat.txt" || true
+adb shell dumpsys dropbox --print data_app_crash data_app_native_crash > "$OUT/crashes.txt" 2>/dev/null || true
+grep -n -A25 "FATAL EXCEPTION\|Fatal signal\|\*\*\* \*\*\*" "$OUT/logcat-full.txt" > "$OUT/crash-summary.txt" 2>/dev/null || true
 ls -la "$OUT"
 exit 0
