@@ -57,6 +57,7 @@ class PacksViewModel(app: Application) : AndroidViewModel(app) {
         val msg = buildString {
             append("Added ${r.added} sticker(s)")
             if (r.failed > 0) append(", ${r.failed} failed")
+            r.firstError?.let { append(". ").append(it) }
             if (r.skippedFull > 0) append(", ${r.skippedFull} skipped (max ${StickerPack.MAX_STICKERS})")
         }
         _state.update { it.copy(busy = false, message = msg) }

@@ -3,6 +3,10 @@ package com.audiostickerwa
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.os.Bundle
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import kotlinx.coroutines.flow.MutableStateFlow
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -49,13 +53,32 @@ import com.audiostickerwa.audio.SoundSheet
 import com.audiostickerwa.ui.PacksViewModel
 
 class MainActivity : ComponentActivity() {
+    /** A file shared to the app from another app (ACTION_SEND), until the UI takes it. */
+    private val shared = MutableStateFlow<Uri?>(null)
+
+    private fun takeShared(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_SEND) return
+        val uri = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        else @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
+        if (uri != null) shared.value = uri
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        takeShared(intent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) takeShared(intent)
         enableEdgeToEdge()
         setContent {
             val green = Color(0xFF00A884)
             MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme(primary = green) else lightColorScheme(primary = green)) {
-                Surface(Modifier.fillMaxSize()) { App() }
+                Surface(Modifier.fillMaxSize()) {
+                    val sharedUri by shared.collectAsStateWithLifecycle()
+                    App(sharedUri = sharedUri, onSharedTaken = { shared.value = null })
+                }
             }
         }
     }
@@ -63,7 +86,7 @@ class MainActivity : ComponentActivity() {
 
 /** Screen keys: "home", "pack:<id>", "audio". */
 @Composable
-private fun App(vm: PacksViewModel = viewModel()) {
+private fun App(sharedUri: Uri?, onSharedTaken: () -> Unit, vm: PacksViewModel = viewModel()) {
     val context = LocalContext.current
     var screen by rememberSaveable { mutableStateOf("home") }
     val snackbar = remember { SnackbarHostState() }
@@ -84,6 +107,21 @@ private fun App(vm: PacksViewModel = viewModel()) {
         val m = actions.message ?: return@LaunchedEffect
         snackbar.showSnackbar(m)
         actions.messageShown()
+    }
+
+    // A shared file opens the maker with it selected (a sound goes to the sound; then the user picks a picture).
+    LaunchedEffect(sharedUri) {
+        val uri = sharedUri ?: return@LaunchedEffect
+        val mime = context.contentResolver.getType(uri) ?: ""
+        maker.reset()
+        if (mime.startsWith("audio/")) {
+            maker.selectTab(com.audiostickerwa.audio.VisualKind.Image)
+            maker.setAudio(uri)
+        } else {
+            maker.setVisual(uri)
+        }
+        screen = "audio"
+        onSharedTaken()
     }
 
     val engineState by engine.state.collectAsStateWithLifecycle()

@@ -4,7 +4,7 @@ An Android app that makes WhatsApp stickers:
 
 1. **Still sticker packs**: you select images. The app converts each one to a 512×512 WebP (less than 100 KB) and makes the 96×96 tray icon. You push **Add to WhatsApp**.
 2. **Animated sticker packs**: you select videos or GIFs. The app converts the first 8 s of each one to an animated WebP (less than 500 KB). You push **Add to WhatsApp**.
-3. **Audio stickers** (stickers with sound): you select a video, GIF or image, select a sound and trim it. The app makes the sticker on the phone and sends it to any chat. Then you can forward it from the normal WhatsApp app.
+3. **Audio stickers** (stickers with sound). You can also **share** a video, GIF, image or sound from another app to "Make audio sticker": you select a video, GIF or image, select a sound and trim it. The app makes the sticker on the phone and sends it to any chat. Then you can forward it from the normal WhatsApp app.
 
 ## How it works
 
@@ -48,4 +48,10 @@ To build the engine again (needs Go 1.26+, the Android NDK and python3):
 engine/build.sh
 ```
 
-The APK is in `app/build/outputs/apk/debug/`. Change `applicationId` in `app/build.gradle.kts` before you publish the app. Do not use "WhatsApp" in the app name.
+The APK is in `app/build/outputs/apk/debug/`. For a small APK (about 8 MB: R8 shrinking, arm64 only, compressed engine library):
+
+```bash
+./gradlew assembleRelease
+```
+
+The release build is signed with the debug key so you can side-load it. Use your own key before you publish. Change `applicationId` in `app/build.gradle.kts` before you publish the app. Do not use "WhatsApp" in the app name.

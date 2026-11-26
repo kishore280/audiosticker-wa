@@ -35,7 +35,7 @@ data class StickerPack(
     }
 }
 
-data class AddResult(val added: Int, val failed: Int, val skippedFull: Int)
+data class AddResult(val added: Int, val failed: Int, val skippedFull: Int, val firstError: String? = null)
 
 /**
  * Makes and changes sticker packs on disk. All functions are suspend functions:
@@ -92,12 +92,16 @@ class StickerRepository(private val context: Context) {
             var added = 0
             var failed = 0
             var skipped = 0
+            var firstError: String? = null
             val animated = p.optBoolean("animated_sticker_pack", false)
             for (uri in uris) {
                 if (stickers.length() >= StickerPack.MAX_STICKERS) { skipped++; continue }
                 val bytes = try {
                     if (animated) toAnimatedWebp(uri) else toStickerWebp(uri)
-                } catch (e: Throwable) { null }
+                } catch (e: Throwable) {
+                    if (firstError == null) firstError = e.message ?: e.javaClass.simpleName
+                    null
+                }
                 if (bytes == null) { failed++; continue }
                 val name = "s_${System.currentTimeMillis()}_$added.webp"
                 File(dir, name).writeBytes(bytes)
@@ -109,7 +113,7 @@ class StickerRepository(private val context: Context) {
                 PackStore.bumpVersion(p)
                 PackStore.save(context, arr)
             }
-            AddResult(added, failed, skipped)
+            AddResult(added, failed, skipped, firstError)
         }
 
     suspend fun removeSticker(id: String, file: String) = withContext(Dispatchers.IO) {

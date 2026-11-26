@@ -23,10 +23,18 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            // R8: removes unused code and resources (smaller APK). Keep rules for the Go engine: proguard-rules.pro.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // For side-loading and testing only. Use your own release key before you publish to Google Play.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
+    // Compress the Go engine library in the APK (~19 MB -> ~7 MB download); Android unpacks it at install.
+    packaging { jniLibs { useLegacyPackaging = true } }
+    // The Go engine is arm64 only (see engine/build.sh).
+    defaultConfig { ndk { abiFilters += listOf("arm64-v8a") } }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

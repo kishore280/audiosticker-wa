@@ -34,32 +34,75 @@ object AnimatedWebp {
 
     // ------------------------------------------------------------ frame extraction
 
+    /**
+     * Reads frames of [startMs, startMs + maxMs). Frames are read already scaled (Android 8.1+), which is
+     * faster, uses less memory and works for more 4K / HEVC / HDR videos. Throws with the real reason
+     * (codec and size included) when the video cannot be read.
+     */
     fun fromVideo(
         ctx: Context, uri: Uri, startMs: Long = 0, maxMs: Long = MAX_DURATION_MS, crop: Boolean = false,
         maxFrames: Int = MAX_FRAMES, onProgress: (Float) -> Unit = {},
-    ): Frames? {
+    ): Frames {
         val r = MediaMetadataRetriever()
         try {
-            r.setDataSource(ctx, uri)
-            val durMs = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: return null
+            try {
+                r.setDataSource(ctx, uri)
+            } catch (e: Exception) {
+                throw IllegalStateException("Cannot open this video (${describe(ctx, uri)}): ${e.message ?: e.javaClass.simpleName}")
+            }
+            val durMs = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+                ?: throw IllegalStateException("This video has no length information (${describe(ctx, uri)}).")
             val useMs = (durMs - startMs).coerceIn(1, maxMs)
             val count = ((useMs * MAX_FPS) / 1000).toInt().coerceIn(1, maxFrames)
             val step = useMs / count
+            // Fit: the frame fits in 512. Fill: the shorter side must still be >= 512 after the cut.
+            val bound = if (crop) SIZE * 2 else SIZE
             val out = ArrayList<Bitmap>(count)
+            var lastError: Throwable? = null
             for (i in 0 until count) {
                 val us = (startMs + i * step + step / 2) * 1000
-                val f = r.getFrameAtTime(us, MediaMetadataRetriever.OPTION_CLOSEST) ?: continue
-                out.add(scale(f, crop))
-                f.recycle()
+                val f = try {
+                    frameAt(r, us, MediaMetadataRetriever.OPTION_CLOSEST, bound)
+                        ?: frameAt(r, us, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, bound)
+                } catch (e: Throwable) { lastError = e; null }
+                if (f != null) {
+                    out.add(scale(f, crop))
+                    f.recycle()
+                }
                 onProgress((i + 1f) / count)
             }
-            if (out.isEmpty()) return null
+            if (out.isEmpty()) {
+                throw IllegalStateException(
+                    "Cannot read frames from this video (${describe(ctx, uri)})" +
+                        (lastError?.let { ": ${it.message ?: it.javaClass.simpleName}" } ?: ": the phone's decoder gave no frames") +
+                        ". Try another video, or convert it to H.264 MP4.",
+                )
+            }
             return Frames(out, maxOf(8, (useMs / out.size).toInt()))
-        } catch (e: Exception) {
-            return null
         } finally {
             try { r.release() } catch (_: Exception) {}
         }
+    }
+
+    private fun frameAt(r: MediaMetadataRetriever, us: Long, option: Int, bound: Int): Bitmap? =
+        if (Build.VERSION.SDK_INT >= 27) r.getScaledFrameAtTime(us, option, bound, bound)
+        else r.getFrameAtTime(us, option)
+
+    /** "video/hevc, 3840×2160" from the first video track, for error messages. */
+    fun describe(ctx: Context, uri: Uri): String = try {
+        val ex = android.media.MediaExtractor()
+        try {
+            ex.setDataSource(ctx, uri, null)
+            (0 until ex.trackCount).map { ex.getTrackFormat(it) }
+                .firstOrNull { it.getString(android.media.MediaFormat.KEY_MIME)?.startsWith("video/") == true }
+                ?.let { f ->
+                    val w = if (f.containsKey(android.media.MediaFormat.KEY_WIDTH)) f.getInteger(android.media.MediaFormat.KEY_WIDTH) else 0
+                    val h = if (f.containsKey(android.media.MediaFormat.KEY_HEIGHT)) f.getInteger(android.media.MediaFormat.KEY_HEIGHT) else 0
+                    "${f.getString(android.media.MediaFormat.KEY_MIME)}, ${w}×$h"
+                } ?: "no video track"
+        } finally { ex.release() }
+    } catch (e: Exception) {
+        ctx.contentResolver.getType(uri) ?: "unknown format"
     }
 
     @Suppress("DEPRECATION")

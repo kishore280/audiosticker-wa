@@ -39,7 +39,12 @@ object SoundStickerMaker {
         // 1. Sound
         progress("Reading the sound…")
         val soundSrc = spec.audio?.uri ?: spec.visual.uri
-        val pcm = AudioPipeline.decodePcm(ctx, soundSrc, spec.startMs, spec.durMs)
+        val pcm = try {
+            AudioPipeline.decodePcm(ctx, soundSrc, spec.startMs, spec.durMs)
+        } catch (e: Exception) {
+            val type = ctx.contentResolver.getType(soundSrc) ?: "unknown format"
+            throw IllegalStateException("Cannot read the sound ($type): ${e.message ?: e.javaClass.simpleName}")
+        }
         if (pcm.size < AudioPipeline.RATE / 4) error("The sound part is too short.")
         progress("Encoding the sound…")
         val seconds = pcm.size.toDouble() / AudioPipeline.RATE
@@ -60,7 +65,7 @@ object SoundStickerMaker {
             }
             VisualKind.Gif -> AnimatedWebp.fromGif(ctx, spec.visual.uri, spec.crop, MAX_FRAMES)
             VisualKind.Image -> stillFrames(ctx, spec.visual.uri, spec.crop)
-        } ?: error("Cannot read the picture.")
+        } ?: error("Cannot read the picture (${ctx.contentResolver.getType(spec.visual.uri) ?: "unknown format"}).")
 
         progress("Encoding the sticker…")
         val meta = JSONObject()
