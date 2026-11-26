@@ -29,17 +29,23 @@ appId: com.kish.wastickers
     start: "38%, 40%"
     end: "52%, 40%"
     duration: 900
-# Trim: move the start handle
-- scrollUntilVisible:
-    element: ".*Play part"
-    direction: DOWN
+# Scroll with swipes that start below the preview: in Fill mode the preview takes drags (it moves the picture).
+- swipe:
+    start: "50%, 93%"
+    end: "50%, 55%"
+    duration: 800
+- waitForAnimationToEnd:
+    timeout: 1500
 - takeScreenshot: demo-out/02b-trim
 - tapOn: ".*Play part"
 - waitForAnimationToEnd:
     timeout: 6000
-- scrollUntilVisible:
-    element: "Create sticker"
-    direction: DOWN
+- swipe:
+    start: "50%, 93%"
+    end: "50%, 35%"
+    duration: 800
+- waitForAnimationToEnd:
+    timeout: 1500
 - tapOn: "Create sticker"
 - extendedWaitUntil:
     visible: ".*Sticker created"
@@ -47,9 +53,10 @@ appId: com.kish.wastickers
 - waitForAnimationToEnd:
     timeout: 3000
 - takeScreenshot: demo-out/03-result
-- scrollUntilVisible:
-    element: "Make another"
-    direction: DOWN
+- swipe:
+    start: "50%, 85%"
+    end: "50%, 45%"
+    duration: 900
 - waitForAnimationToEnd:
     timeout: 2500
 - back

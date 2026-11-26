@@ -24,6 +24,13 @@ appId: com.kish.wastickers
     end: "40%, 32%"
     duration: 1000
 - takeScreenshot: demo-out/06-clip-editor
+# Scroll from below the preview (the preview takes drags in Fill mode).
+- swipe:
+    start: "50%, 93%"
+    end: "50%, 40%"
+    duration: 800
+- waitForAnimationToEnd:
+    timeout: 1500
 - tapOn: "Add to pack"
 - extendedWaitUntil:
     visible: "Sticker added"
