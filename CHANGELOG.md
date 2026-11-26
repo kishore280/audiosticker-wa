@@ -2,6 +2,15 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## [1.0.1] - 2026-11-26
+
+### Changed
+- Settings is now a full screen (Sticker info, WhatsApp, Updates, About), not a bottom sheet.
+- The phone's Back gesture in Settings also saves the pack name and publisher.
+
+### Added
+- About section: made by Kish, links to GitHub, the source code and problem reports.
+
 ## [1.0.0] - 2026-11-26
 
 First public release.

@@ -53,7 +53,7 @@ import com.kish.wastickers.ui.ShareTarget
 import com.kish.wastickers.ui.ShareTargetSheet
 import com.kish.wastickers.settings.AppSettings
 import com.kish.wastickers.settings.AppUpdate
-import com.kish.wastickers.settings.SettingsSheet
+import com.kish.wastickers.settings.SettingsScreen
 import com.kish.wastickers.settings.UpdateChecker
 import com.kish.wastickers.settings.UpdateState
 import kotlinx.coroutines.launch
@@ -191,7 +191,9 @@ private fun App(sharedUris: List<Uri>, onSharedTaken: () -> Unit, vm: PacksViewM
     val engineState by engine.state.collectAsStateWithLifecycle()
     val sounds by library.items.collectAsStateWithLifecycle()
     val names by settings.names.collectAsStateWithLifecycle()
-    var showSettings by remember { mutableStateOf(false) }
+    // Settings is a screen; it goes back to the screen that opened it.
+    var settingsBack by rememberSaveable { mutableStateOf("home") }
+    fun openSettings() { if (screen != "settings") settingsBack = screen; screen = "settings" }
 
     // Update check (GitHub Releases): once per app start, and on demand in Settings.
     var update by remember { mutableStateOf<UpdateState>(UpdateState.Idle) }
@@ -211,8 +213,20 @@ private fun App(sharedUris: List<Uri>, onSharedTaken: () -> Unit, vm: PacksViewM
     var sendFor by remember { mutableStateOf<SavedSound?>(null) }
 
     when {
+        screen == "settings" -> {
+            SettingsScreen(
+                names = names,
+                linkedPhone = (engineState as? EngineState.Linked)?.phone,
+                update = update,
+                onSaveNames = settings::setNames,
+                onUnlink = { appScope.launch { engine.logout() } },
+                onCheckUpdate = { checkUpdate(manual = true) },
+                onOpenUrl = openUrl,
+                onBack = { screen = settingsBack },
+            )
+        }
         screen == "audio" -> {
-            AudioMakerScreen(engine, maker, actions, snackbar, names = names, onEditNames = { showSettings = true }, onBack = { screen = "home" })
+            AudioMakerScreen(engine, maker, actions, snackbar, names = names, onEditNames = { openSettings() }, onBack = { screen = "home" })
             BackHandler { screen = "home" }
         }
         else -> PackScreens(
@@ -224,23 +238,11 @@ private fun App(sharedUris: List<Uri>, onSharedTaken: () -> Unit, vm: PacksViewM
             onOpenSound = { openSound = it.id },
             defaultPublisher = names.publisher,
             update = (update as? UpdateState.Available)?.update,
-            onOpenSettings = { showSettings = true },
+            onOpenSettings = { openSettings() },
             onOpenUrl = openUrl,
         )
     }
 
-    if (showSettings) {
-        SettingsSheet(
-            names = names,
-            linkedPhone = (engineState as? EngineState.Linked)?.phone,
-            update = update,
-            onSaveNames = settings::setNames,
-            onUnlink = { appScope.launch { engine.logout() } },
-            onCheckUpdate = { checkUpdate(manual = true) },
-            onOpenUrl = openUrl,
-            onDismiss = { showSettings = false },
-        )
-    }
 
     sounds.firstOrNull { it.id == openSound }?.let { item ->
         SoundSheet(
