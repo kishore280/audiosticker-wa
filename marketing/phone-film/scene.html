@@ -20,7 +20,7 @@ html,body{width:1080px;height:1920px;overflow:hidden;background:#0c1b16;font-fam
 #icon{position:absolute;left:430px;top:900px;width:220px;height:220px;border-radius:52px;overflow:hidden;box-shadow:0 30px 80px #0008}
 .chip{position:absolute;display:flex;align-items:center;gap:14px;background:#f4fbf7;color:#0c2a21;border-radius:40px;padding:18px 28px;font:700 34px Inter;box-shadow:0 14px 40px #0006;white-space:nowrap}
 .chip b{font-size:36px}
-#card{position:absolute;left:600px;top:1120px;width:420px;background:#1f2c33;border-radius:30px;padding:22px;box-shadow:0 30px 80px #000a}
+#card{position:absolute;left:600px;top:560px;width:420px;background:#1f2c33;border-radius:30px;padding:22px;box-shadow:0 30px 80px #000a}
 #card .hd{display:flex;align-items:center;gap:14px;font:700 28px Inter;margin-bottom:16px}
 #card .av{width:52px;height:52px;border-radius:50%;background:#ffcf3a;display:flex;align-items:center;justify-content:center;font-size:28px}
 #card .stk{position:relative;width:260px;height:260px;margin-left:auto;border-radius:18px;overflow:hidden}
@@ -40,7 +40,7 @@ html,body{width:1080px;height:1920px;overflow:hidden;background:#0c1b16;font-fam
 <div id="phone"><div id="screen"><img id="frame" alt=""></div></div>
 <div id="icon"></div>
 <div id="card"><div class="hd"><div class="av">🏖️</div>Beach crew</div>
-  <div class="stk"><img id="cardImg" src="../../docs/demo/sunny.png" alt=""><div class="snd">🔊</div></div></div>
+  <div class="stk"><img id="cardImg" src="card.png" alt=""><div class="snd">🔊</div></div></div>
 <div id="rings"></div>
 <div id="chips"></div>
 <div id="end"><div id="word">Sticker Studio</div><div id="tag">Stickers with sound.</div>
@@ -49,7 +49,17 @@ html,body{width:1080px;height:1920px;overflow:hidden;background:#0c1b16;font-fam
 window.DURATION = 30;
 // ---------- the real app footage: [t0, t1, clip, from (s in the footage), speed] ----------
 window.CLIPS = [
-  // filled from the emulator recording (see README in this folder)
+  [2.2, 4.0, 'share', 0.2, 1.1],     // the share sheet slides up: "Use this video for..."
+  [4.0, 6.0, 'open', 0.2, 2.25],     // tap "Audio sticker", the maker opens with the video
+  [6.0, 7.8, 'fill', 0.2, 2.8],      // Fit -> Fill
+  [7.8, 9.6, 'drag', 0.2, 3.0],      // drag the square
+  [9.6, 11.0, 'play', 0.3, 1.1],     // the part plays
+  [11.0, 12.6, 'create', 2.2, 1.1],  // Create sticker -> Creating...
+  [12.6, 19.0, 'result', 0, 0],      // Sticker created
+  [19.0, 19.6, 'pack', 0.2, 1.6],    // a new pack
+  [19.6, 21.4, 'clip', 0.2, 4.0],    // clip editor -> Add to pack
+  [21.4, 23.0, 'full', 0, 1],        // the full pack and Add to WhatsApp
+  [23.0, 26.4, 'home', 0.2, 1],      // home with the library
 ];
 // ---------- headlines: [start, end, html] (<em> = the highlighted word) ----------
 const CAPS = [
@@ -80,7 +90,7 @@ const chipEls = CHIPS.map(([e, txt, x, y]) => {
   d.style.left = x + 'px'; d.style.top = y + 'px'; $('chips').appendChild(d); return d;
 });
 const ringEls = [0, 1, 2].map(() => { const r = document.createElement('div'); r.className = 'ring'; $('rings').appendChild(r); return r; });
-const RING = { x: 540, y: 980, size: 260 };   // sticker position on screen during 15-19 s (set from the footage)
+const RING = { x: 540, y: 1254, size: 290 };   // sticker position on screen during 15-19 s (set from the footage)
 
 let lastSrc = '';
 async function setFrame(t) {

@@ -24,11 +24,11 @@ DUR = 30.0
 A = os.path.join(HERE, 'assets') + '/'
 
 # ---------- cue times (seconds; the same times as scene.html) ----------
-TAPS = []                      # press frames of the taps in the footage (set from the recording)
+TAPS = [4.12, 6.92, 11.82]  # press frames in the footage: "Audio sticker", "Fill", "Create sticker"
 REVEAL = 2.35                  # icon grows into the phone
 CARD = 16.45                   # chat card arrives (50 % of its travel)
 STICKER_SOUND = (15.4, 18.8)   # the sticker plays its own sound under the rings
-CREATED = 14.0                 # "Sticker created" appears (the one reward sound)
+CREATED = 12.62               # "Sticker created" appears (the one reward sound)
 CHIPS = [23.3 + 0.12 * i + 0.12 for i in range(6)]
 SHRINK_TO_CHIPS = 23.15
 SHRINK_TO_LOGO = 26.15

@@ -21,7 +21,7 @@ if (mode === 'frames') {
     const name = f.replace(/\.mp4$/, '');
     mkdirSync(path.join(dir, 'frames', name), { recursive: true });
     const r = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', '-i', path.join(dir, 'footage', f),
-      '-vf', 'fps=60,scale=540:-2:flags=lanczos', '-q:v', '3', path.join(dir, 'frames', name, '%05d.jpg')], { stdio: 'inherit' });
+      '-vf', 'fps=60,scale=580:-2:flags=lanczos', '-q:v', '3', path.join(dir, 'frames', name, '%05d.jpg')], { stdio: 'inherit' });
     if (r.status) process.exit(r.status);
     console.log('frames', name);
   }
