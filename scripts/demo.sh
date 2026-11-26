@@ -11,11 +11,11 @@ adb install -r -g app/build/outputs/apk/debug/app-debug.apk
 adb logcat -c; adb logcat -v time > "$OUT/logcat-full.txt" 2>/dev/null &
 
 # The emulator's Pixel Launcher often freezes ("isn't responding") under software graphics and its dialog covers the app.
-# Maestro starts the app itself, so turn the launcher off and hide error dialogs.
+# Maestro starts the app itself, so turn the launcher off and hide error dialogs. System UI may restart after this,
+# so the demo status bar is set after a pause.
 adb shell pm disable-user --user 0 com.google.android.apps.nexuslauncher || true
 adb shell settings put global hide_error_dialogs 1 || true
-adb shell am force-stop com.google.android.apps.nexuslauncher || true
-sleep 20
+sleep 25
 
 # Clean look: dark mode, visible touches, demo status bar (9:41, full battery, no notifications).
 adb shell cmd uimode night yes
@@ -29,8 +29,15 @@ done
 rec()  { adb shell screenrecord --bit-rate 16000000 --time-limit 178 "/sdcard/$1.mp4" & sleep 2; }
 stop() { adb shell pkill -INT screenrecord || true; sleep 3; adb pull "/sdcard/$1.mp4" "$OUT/" || true; }
 flow() { maestro test --no-ansi --debug-output "$OUT/maestro-$1" ".maestro/$1.yaml" || echo "FLOW FAILED: $1" | tee -a "$OUT/failures.txt"; }
-D=/sdcard/Android/data/$PKG/files
-media() { adb shell mkdir -p "$D"; adb push docs/demo/beach_party.mp4 docs/demo/dance.gif docs/demo/sunny.png "$D/"; }
+# Sample media goes into the app's own files folder (run-as: the demo APK is a debug build), so the app can read it.
+D=/data/user/0/$PKG/files
+media() {
+  for f in beach_party.mp4 dance.gif sunny.png; do
+    adb push "docs/demo/$f" "/data/local/tmp/$f" >/dev/null
+    adb shell "run-as $PKG mkdir -p files && cat /data/local/tmp/$f | run-as $PKG sh -c 'cat > files/$f'"
+  done
+  adb shell run-as $PKG ls -la files
+}
 # Share a file to the app, like "Share" from a gallery app.
 share() { adb shell am start -a android.intent.action.SEND -t "$2" --eu android.intent.extra.STREAM "file://$D/$1" -n "$PKG/.MainActivity"; }
 dump() { maestro hierarchy > "$OUT/hierarchy-$1.json" 2>/dev/null || true; }

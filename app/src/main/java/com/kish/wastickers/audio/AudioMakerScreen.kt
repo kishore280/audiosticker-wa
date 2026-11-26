@@ -202,7 +202,13 @@ fun AudioMakerContent(
             Step(1, "Choose ${ui.tab.article} ${ui.tab.label.lowercase()}")
             FileCard(
                 title = ui.visual?.name,
-                subtitle = ui.visual?.let { if (it.durationMs > 0) fmt(it.durationMs.toFloat()) else "Picture" },
+                subtitle = ui.visual?.let {
+                    when {
+                        it.durationMs > 0 -> fmt(it.durationMs.toFloat())
+                        ui.tab == VisualKind.Video -> "Cannot read this video. Try another file."
+                        else -> "Picture"
+                    }
+                },
                 emptyText = "Select ${ui.tab.article} ${ui.tab.label.lowercase()}",
                 onClick = onPickVisual,
             )
