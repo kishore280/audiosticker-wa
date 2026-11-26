@@ -112,7 +112,6 @@ class WaEngine(context: Context) {
             try { WebViewCompat.addDocumentStartJavaScript(this, scripts, setOf("https://web.whatsapp.com")) } catch (_: Exception) {}
         }
         addJavascriptInterface(Bridge(), "AndroidBridge")
-        addJavascriptInterface(FileSaver(appContext), "AndroidSaver")
         webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, url: String?) = inject()
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {

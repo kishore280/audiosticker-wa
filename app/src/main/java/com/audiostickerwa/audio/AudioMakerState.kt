@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Movie
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Base64
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -18,23 +19,25 @@ import java.io.File
 
 enum class VisualKind { Video, Gif, Image }
 
-data class Media(val uri: Uri, val mime: String, val durationMs: Long)
+data class Media(val uri: Uri, val mime: String, val durationMs: Long, val name: String)
 
 /** What the audio maker screen renders. [visualKind] is null when no picture is selected. */
 data class AudioMakerUi(
-    val visualKind: VisualKind? = null,
-    val visualMs: Long = 0,
-    val audioMs: Long? = null,
+    /** Selected tab. */
+    val tab: VisualKind = VisualKind.Video,
+    /** Selected picture (null = none yet). */
+    val visual: Media? = null,
+    val audio: Media? = null,
     val needsAudio: Boolean = false,
     val timedMs: Long = 0,
     val range: ClosedFloatingPointRange<Float> = 0f..0f,
     val crop: Boolean = false,
-    val normalize: Boolean = true,
     val canCreate: Boolean = false,
     val busy: Boolean = false,
     val error: String? = null,
     val result: MadeSticker? = null,
     val lastSent: String? = null,
+    val saved: String? = null,
 )
 
 data class MadeSticker(val webp: File, val ogg: File, val webpBytes: Int, val oggBytes: Int, val seconds: Int, val stamp: Long)
@@ -53,11 +56,12 @@ class AudioMakerState(
 ) {
     var visual by mutableStateOf<Media?>(null); private set
     var visualKind by mutableStateOf(VisualKind.Video); private set
+    var tab by mutableStateOf(VisualKind.Video); private set
+    var saved by mutableStateOf<String?>(null); private set
     var audio by mutableStateOf<Media?>(null); private set
     /** Trim range in ms on the timed source (separate audio if set, else the video). */
-    var range by mutableStateOf(0f..0f)
-    var crop by mutableStateOf(false)
-    var normalize by mutableStateOf(true)
+    var range by mutableStateOf(0f..0f); private set
+    var crop by mutableStateOf(false); private set
     var busy by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null)
     var result by mutableStateOf<MadeSticker?>(null); private set
@@ -65,9 +69,9 @@ class AudioMakerState(
 
     /** Immutable snapshot for the stateless content composable. */
     fun ui() = AudioMakerUi(
-        visualKind = visual?.let { visualKind }, visualMs = visual?.durationMs ?: 0, audioMs = audio?.durationMs,
-        needsAudio = needsAudio, timedMs = timedDurationMs, range = range, crop = crop, normalize = normalize,
-        canCreate = canCreate, busy = busy, error = error, result = result, lastSent = lastSent,
+        tab = tab, visual = visual, audio = audio,
+        needsAudio = needsAudio, timedMs = timedDurationMs, range = range, crop = crop,
+        canCreate = canCreate, busy = busy, error = error, result = result, lastSent = lastSent, saved = saved,
     )
 
     /** The source that the trim slider controls. */
@@ -77,7 +81,27 @@ class AudioMakerState(
 
     val canCreate: Boolean get() = visual != null && !needsAudio && !busy && range.endInclusive - range.start >= 300f
 
+    /** Changing the tab clears a picture of the other kind (and the result). */
+    fun selectTab(kind: VisualKind) {
+        if (kind == tab) return
+        tab = kind
+        if (visual != null && visualKind != kind) { visual = null; result = null; lastSent = null; resetRange() }
+    }
+
+    /** A new trim or crop makes the old sticker out of date. */
+    fun changeRange(r: ClosedFloatingPointRange<Float>) { if (r != range) { range = r; clearResult() } }
+    fun changeCrop(c: Boolean) { if (c != crop) { crop = c; clearResult() } }
+    private fun clearResult() { if (!busy) { result = null; lastSent = null; saved = null } }
+
     fun setVisual(uri: Uri) { scope.launch { loadVisual(uri) } }
+    fun save() {
+        val r = result ?: return
+        scope.launch {
+            val a = saveToDownloads(context, r.webp, "sticker_${r.stamp}.webp", "image/webp")
+            saveToDownloads(context, r.ogg, "sticker_${r.stamp}.ogg", "audio/ogg")
+            saved = "Saved: ${a.substringBeforeLast('/')}/ (.webp + .ogg)"
+        }
+    }
     fun setAudio(uri: Uri?) { scope.launch { loadAudio(uri) } }
     fun create() { if (!busy) scope.launch { doCreate() } }
     fun send(chat: WaChat) { if (!busy) scope.launch { doSend(chat) } }
@@ -96,18 +120,19 @@ class AudioMakerState(
                 VisualKind.Image -> 0L
             }
         }
-        visual = Media(uri, mime, dur)
+        visual = Media(uri, mime, dur, displayName(uri))
         visualKind = kind
-        result = null
+        tab = kind
+        result = null; lastSent = null; saved = null
         resetRange()
     }
 
     private suspend fun loadAudio(uri: Uri?) {
         audio = uri?.let {
             val mime = context.contentResolver.getType(it) ?: "audio/mpeg"
-            Media(it, mime, withContext(Dispatchers.IO) { mediaDuration(it) })
+            Media(it, mime, withContext(Dispatchers.IO) { mediaDuration(it) }, displayName(it))
         }
-        result = null
+        result = null; lastSent = null; saved = null
         resetRange()
     }
 
@@ -118,7 +143,7 @@ class AudioMakerState(
 
     private suspend fun doCreate() {
         val v = visual ?: return
-        busy = true; error = null
+        busy = true; error = null; lastSent = null; saved = null
         try {
             val startS = range.start / 1000.0
             val lenS = (range.endInclusive - range.start) / 1000.0
@@ -135,7 +160,6 @@ class AudioMakerState(
             }
             val opts = JSONObject().put("visual", vis)
                 .put("crop", crop)
-                .put("normalize", normalize)
             if (a != null) {
                 opts.put("audio", JSONObject().put("url", engine.shareFile(a.uri, a.mime)).put("mime", a.mime)
                     .put("name", fileName(a.mime)).put("start", startS).put("dur", lenS))
@@ -159,7 +183,7 @@ class AudioMakerState(
         busy = true; error = null
         try {
             val title = engine.call("__app.send(${JSONObject.quote(chat.id)})") as? String ?: chat.title
-            lastSent = "Sent to $title. Open WhatsApp to forward it anywhere."
+            lastSent = "Sent to $title ✓  Open WhatsApp to forward it anywhere."
         } catch (e: Exception) {
             error = e.message ?: e.toString()
         } finally {
@@ -182,10 +206,17 @@ class AudioMakerState(
         return Movie.decodeByteArray(bytes, 0, bytes.size)?.duration()?.toLong()?.takeIf { it > 0 } ?: 1000L
     }
 
+    private fun displayName(uri: Uri): String = try {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        }
+    } catch (e: Exception) { null } ?: (uri.lastPathSegment ?: "file")
+
     private fun fileName(mime: String) = "media." + (mime.substringAfter('/').substringBefore(';').ifEmpty { "bin" })
 
     companion object {
         const val DEFAULT_LEN_MS = 5000f
-        const val MAX_LEN_MS = 30_000f
+        const val MAX_LEN_MS = 15_000f
+        const val GOOD_LEN_MS = 10_000f
     }
 }

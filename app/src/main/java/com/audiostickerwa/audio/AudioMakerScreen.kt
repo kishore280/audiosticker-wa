@@ -5,6 +5,18 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -64,13 +76,17 @@ fun AudioMakerScreen(
     val capsWarning by engine.capsWarning.collectAsStateWithLifecycle()
     // The chat list dialog is local UI: loading it is a user-event coroutine of this screen.
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var chatPicker by remember { mutableStateOf<List<WaChat>?>(null) }
 
     val pickVisual = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) maker.setVisual(uri)
     }
-    val pickAudio = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) maker.setAudio(uri)
+    // GIF and audio come from the document picker; the result goes to the picture or the sound by its type.
+    val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val mime = context.contentResolver.getType(uri) ?: ""
+        if (mime.startsWith("audio/") || mime == "application/ogg") maker.setAudio(uri) else maker.setVisual(uri)
     }
 
     AudioMakerContent(
@@ -81,12 +97,19 @@ fun AudioMakerScreen(
         onBack = onBack,
         onLink = onShowWhatsAppWeb,
         onRetry = engine::reload,
-        onPickVisual = { pickVisual.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) },
-        onPickAudio = { pickAudio.launch("audio/*") },
+        onTab = maker::selectTab,
+        onPickVisual = {
+            when (maker.tab) {
+                VisualKind.Video -> pickVisual.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+                VisualKind.Image -> pickVisual.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                VisualKind.Gif -> pickFile.launch("image/gif")
+            }
+        },
+        onPickAudio = { pickFile.launch("audio/*") },
+        onSave = maker::save,
         onRemoveAudio = { maker.setAudio(null) },
-        onRangeChange = { maker.range = it },
-        onCropChange = { maker.crop = it },
-        onNormalizeChange = { maker.normalize = it },
+        onRangeChange = maker::changeRange,
+        onCropChange = maker::changeCrop,
         onCreate = maker::create,
         onSendClick = {
             scope.launch {
@@ -105,7 +128,7 @@ fun AudioMakerScreen(
     }
 }
 
-/** Stateless, previewable content. */
+/** Stateless, previewable content. Flow: tab → choose → (sound) → trim with preview → create → hear → send / save. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AudioMakerContent(
@@ -116,17 +139,20 @@ fun AudioMakerContent(
     onBack: () -> Unit,
     onLink: () -> Unit,
     onRetry: () -> Unit,
+    onTab: (VisualKind) -> Unit,
     onPickVisual: () -> Unit,
     onPickAudio: () -> Unit,
     onRemoveAudio: () -> Unit,
     onRangeChange: (ClosedFloatingPointRange<Float>) -> Unit,
     onCropChange: (Boolean) -> Unit,
-    onNormalizeChange: (Boolean) -> Unit,
     onCreate: () -> Unit,
     onSendClick: () -> Unit,
+    onSave: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val ready = engineState == EngineState.Ready
+    var playing by remember(ui.visual, ui.audio) { mutableStateOf(false) }
+    var moreOptions by remember { mutableStateOf(false) }
     Scaffold(
         modifier = modifier,
         topBar = {
@@ -137,86 +163,173 @@ fun AudioMakerContent(
         },
     ) { pad ->
         Column(
-            Modifier.padding(pad).padding(16.dp).verticalScroll(rememberScrollState()),
+            Modifier.padding(pad).padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            EngineCard(engineState, onLink = onLink, onRetry = onRetry)
+            if (!ready) EngineCard(engineState, onLink = onLink, onRetry = onRetry)
             capsWarning?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 
-            Text("1. Picture", style = MaterialTheme.typography.titleMedium)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = onPickVisual) {
-                    Text(if (ui.visualKind == null) "Select video, GIF or image" else "Change")
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                VisualKind.entries.forEachIndexed { i, k ->
+                    SegmentedButton(
+                        selected = ui.tab == k,
+                        onClick = { onTab(k) },
+                        shape = SegmentedButtonDefaults.itemShape(i, VisualKind.entries.size),
+                    ) { Text(k.label) }
                 }
-                Spacer(Modifier.width(12.dp))
-                ui.visualKind?.let { Text(it.name + if (ui.visualMs > 0) " · ${fmt(ui.visualMs.toFloat())}" else "") }
             }
 
-            Text("2. Sound", style = MaterialTheme.typography.titleMedium)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = onPickAudio) { Text(if (ui.audioMs == null) "Select audio file" else "Change audio") }
-                Spacer(Modifier.width(8.dp))
-                if (ui.audioMs != null) TextButton(onClick = onRemoveAudio) { Text("Remove") }
-            }
-            Text(
-                when {
-                    ui.audioMs != null -> "Audio file · ${fmt(ui.audioMs.toFloat())}"
-                    ui.visualKind == VisualKind.Video -> "The video's own sound is used."
-                    ui.needsAudio -> "A GIF or image needs an audio file."
-                    else -> "Select the picture first."
-                },
-                style = MaterialTheme.typography.bodySmall,
+            // ---- 1. Choose
+            Step(1, "Choose ${ui.tab.article} ${ui.tab.label.lowercase()}")
+            FileCard(
+                title = ui.visual?.name,
+                subtitle = ui.visual?.let { if (it.durationMs > 0) fmt(it.durationMs.toFloat()) else "Picture" },
+                emptyText = "Select ${ui.tab.article} ${ui.tab.label.lowercase()}",
+                onClick = onPickVisual,
             )
 
+            // ---- Sound
+            if (ui.visual != null) {
+                if (ui.tab == VisualKind.Video) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (ui.audio == null) "Sound: the video's own sound" else "Sound: ${ui.audio.name}",
+                            Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+                        )
+                        if (ui.audio == null) TextButton(onClick = onPickAudio) { Text("Use other sound") }
+                        else TextButton(onClick = onRemoveAudio) { Text("Use video sound") }
+                    }
+                } else {
+                    Step(2, "Choose a sound")
+                    FileCard(
+                        title = ui.audio?.name,
+                        subtitle = ui.audio?.let { fmt(it.durationMs.toFloat()) },
+                        emptyText = "Select an audio file (MP3, M4A, WAV, OGG…)",
+                        onClick = onPickAudio,
+                    )
+                }
+            }
+
+            // ---- Preview + trim
+            if (ui.visual != null) {
+                ClipPreview(
+                    kind = ui.tab, visual = ui.visual.uri, audio = ui.audio?.uri, range = ui.range,
+                    playing = playing, onFinished = { playing = false },
+                )
+            }
             if (ui.timedMs > 0) {
-                Text("3. Trim", style = MaterialTheme.typography.titleMedium)
                 RangeSlider(
                     value = ui.range,
                     onValueChange = { r ->
-                        // Keep the clip at most MAX_LEN_MS long.
+                        playing = false
                         onRangeChange(r.start..minOf(r.endInclusive, r.start + AudioMakerState.MAX_LEN_MS))
                     },
                     valueRange = 0f..ui.timedMs.toFloat(),
                 )
-                Text("${fmt(ui.range.start)} – ${fmt(ui.range.endInclusive)}  (${fmt(ui.range.endInclusive - ui.range.start)})")
+                val len = ui.range.endInclusive - ui.range.start
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = { playing = !playing }) { Text(if (playing) "■ Stop" else "▶ Play") }
+                    Spacer(Modifier.width(12.dp))
+                    Text("${fmt(ui.range.start)} → ${fmt(ui.range.endInclusive)}", Modifier.weight(1f))
+                    AssistChip(onClick = {}, label = { Text(fmt(len)) })
+                }
+                Text(
+                    "Drag the two ends to choose the part. " +
+                        if (len > AudioMakerState.GOOD_LEN_MS) "Shorter than 10 s looks better." else "10 seconds or less works best.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Crop to fill the square", Modifier.weight(1f))
-                Switch(checked = ui.crop, onCheckedChange = onCropChange)
+            // ---- 2/3. Create and send
+            HorizontalDivider()
+            Step(if (ui.tab == VisualKind.Video) 2 else 3, "Create and send")
+            Button(onClick = onCreate, enabled = ui.canCreate && ready && ui.result == null, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    when {
+                        ui.busy && ui.result == null -> "Creating…"
+                        ui.result != null -> "✓ Sticker created"
+                        else -> "Create sticker"
+                    },
+                )
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Make sound louder (normalize)", Modifier.weight(1f))
-                Switch(checked = ui.normalize, onCheckedChange = onNormalizeChange)
+            if (ui.busy) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                Text(progress ?: "Working…", style = MaterialTheme.typography.bodySmall)
             }
-
-            Button(onClick = onCreate, enabled = ui.canCreate && ready, modifier = Modifier.fillMaxWidth()) {
-                Text("Create sticker")
-            }
-            if (ui.busy) Text(progress ?: "Working…", style = MaterialTheme.typography.bodySmall)
             ui.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            ui.lastSent?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
 
             ui.result?.let { r ->
-                HorizontalDivider()
-                Text("Preview", style = MaterialTheme.typography.titleMedium)
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    AnimatedStickerImage(r.webp, "sticker preview", Modifier.size(160.dp))
+                    TapToHearSticker(r, Modifier.size(140.dp))
                     Spacer(Modifier.width(12.dp))
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        SoundButton(r)
-                        Text(
-                            "Sticker ${r.webpBytes / 1024} KB · sound ${r.oggBytes / 1024} KB, ${r.seconds} s",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
+                    Column {
+                        Text("Tap the sticker to hear it.", style = MaterialTheme.typography.bodySmall)
+                        Text("${r.seconds} s · ${r.webpBytes / 1024} KB + ${r.oggBytes / 1024} KB sound",
+                            style = MaterialTheme.typography.bodySmall)
                     }
                 }
-                Button(onClick = onSendClick, enabled = !ui.busy && ready, modifier = Modifier.fillMaxWidth()) {
-                    Text("Send to WhatsApp")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = onSendClick, enabled = !ui.busy && ready, modifier = Modifier.weight(1f)) { Text("Send") }
+                    OutlinedButton(onClick = onSave, enabled = !ui.busy) { Text("Save") }
                 }
+                ui.saved?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             }
-            ui.lastSent?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+
+            // ---- More options
+            TextButton(onClick = { moreOptions = !moreOptions }) { Text(if (moreOptions) "▾ More options" else "▸ More options") }
+            if (moreOptions) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Crop to fill the square", Modifier.weight(1f))
+                    Switch(checked = ui.crop, onCheckedChange = onCropChange)
+                }
+                if (ready) TextButton(onClick = onLink) { Text("Show WhatsApp Web") }
+            }
+            Spacer(Modifier.size(24.dp))
         }
     }
+}
+
+private val VisualKind.label get() = when (this) { VisualKind.Video -> "Video"; VisualKind.Image -> "Image"; VisualKind.Gif -> "GIF" }
+private val VisualKind.article get() = if (this == VisualKind.Image) "an" else "a"
+
+@Composable
+private fun Step(n: Int, title: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier.size(24.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
+            contentAlignment = Alignment.Center,
+        ) { Text("$n", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelMedium) }
+        Spacer(Modifier.width(8.dp))
+        Text(title, style = MaterialTheme.typography.titleMedium)
+    }
+}
+
+@Composable
+private fun FileCard(title: String?, subtitle: String?, emptyText: String, onClick: () -> Unit) {
+    Card(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title ?: emptyText, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                subtitle?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            }
+            Text(if (title == null) "Select" else "Change", color = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
+/** The made sticker; a tap plays its sound. The MediaPlayer belongs to this composable. */
+@Composable
+private fun TapToHearSticker(r: MadeSticker, modifier: Modifier = Modifier) {
+    var player by remember(r.stamp) { mutableStateOf<MediaPlayer?>(null) }
+    DisposableEffect(r.stamp) { onDispose { player?.release(); player = null } }
+    AnimatedStickerImage(
+        r.webp, "sticker preview",
+        modifier.clip(RoundedCornerShape(12.dp)).background(Color(0x22888888)).clickable {
+            player?.release()
+            player = try { MediaPlayer().apply { setDataSource(r.ogg.path); prepare(); start() } } catch (e: Exception) { null }
+        },
+    )
 }
 
 @Composable
@@ -243,19 +356,6 @@ private fun EngineCard(state: EngineState, onLink: () -> Unit, onRetry: () -> Un
             }
         }
     }
-}
-
-/** Plays the Ogg/Opus sound. The MediaPlayer belongs to this composable and is released with it. */
-@Composable
-private fun SoundButton(r: MadeSticker) {
-    var player by remember(r.stamp) { mutableStateOf<MediaPlayer?>(null) }
-    DisposableEffect(r.stamp) { onDispose { player?.release(); player = null } }
-    OutlinedButton(onClick = {
-        player?.release()
-        player = try {
-            MediaPlayer().apply { setDataSource(r.ogg.path); prepare(); start() }
-        } catch (e: Exception) { null }
-    }) { Text("Play sound") }
 }
 
 @Composable
