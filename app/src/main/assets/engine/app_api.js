@@ -41,6 +41,11 @@
     state: function () {
       var w = W();
       if (!w || !w.hasLoader()) return { ready: false, detail: 'Loading WhatsApp Web…' };
+      // Do not touch WhatsApp modules before the chat list exists: early require() calls log errors.
+      if (!document.querySelector('#pane-side')) {
+        var login = /log ?in|link with phone|scan/i.test((document.body && document.body.innerText || '').slice(0, 2000));
+        return { ready: false, detail: login ? 'Not linked yet' : 'Loading WhatsApp Web…' };
+      }
       try {
         var CC = w.ns('WAWebChatCollection').ChatCollection;
         var Me = w.ns('WAWebUserPrefsMeUser');

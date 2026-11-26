@@ -6,10 +6,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.content.Intent
-import androidx.webkit.UserAgentMetadata
-import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
-import androidx.webkit.WebViewFeature
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.ServiceWorkerClient
@@ -56,6 +53,17 @@ class WaEngine(context: Context) {
     private val scripts: String = EngineScripts.wrap(EngineScripts.load(context))
     private var started = false
 
+    private val _diag = MutableStateFlow("")
+    /** One line for the user: load %, URL, last error. Shown on the WhatsApp Web page. */
+    val diagnostics: StateFlow<String> = _diag.asStateFlow()
+    private var loadPct = 0
+    private var lastError = ""
+    private fun updateDiag() {
+        val url = webView.url ?: "-"
+        _diag.value = "Load $loadPct% · $url" + if (lastError.isNotEmpty()) " · $lastError" else ""
+    }
+    private fun error(msg: String) { lastError = msg.take(160); main.post { updateDiag() } }
+
     private val _caps = MutableStateFlow<String?>(null)
     /** Null when the encoders are supported; else a short warning for the user. */
     val capsWarning: StateFlow<String?> = _caps.asStateFlow()
@@ -90,31 +98,26 @@ class WaEngine(context: Context) {
             userAgentString = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) " +
                 "Chrome/$version Safari/537.36"
         }
-        // A custom UA can still leave "Android / mobile" in the client hints. Make them say desktop Windows.
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.USER_AGENT_METADATA)) {
-            try {
-                val major = (WebViewCompat.getCurrentWebViewPackage(context)?.versionName ?: "142").substringBefore('.')
-                WebSettingsCompat.setUserAgentMetadata(
-                    settings,
-                    UserAgentMetadata.Builder()
-                        .setPlatform("Windows").setPlatformVersion("10.0.0").setMobile(false).setModel("")
-                        .setBrandVersionList(listOf(
-                            UserAgentMetadata.BrandVersion.Builder().setBrand("Chromium").setMajorVersion(major).setFullVersion(major).build(),
-                            UserAgentMetadata.BrandVersion.Builder().setBrand("Google Chrome").setMajorVersion(major).setFullVersion(major).build(),
-                        ))
-                        .build(),
-                )
-            } catch (_: Exception) {}
-        }
-        // Run the engine before WhatsApp's own code (the original extension's sound-sticker flags work best early).
-        // onPageFinished below is the fallback for old WebViews.
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-            try { WebViewCompat.addDocumentStartJavaScript(this, scripts, setOf("https://web.whatsapp.com")) } catch (_: Exception) {}
+        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+        // Debug builds: the page can be inspected from a PC with chrome://inspect.
+        if (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+            WebView.setWebContentsDebuggingEnabled(true)
         }
         addJavascriptInterface(Bridge(), "AndroidBridge")
         webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView, url: String?) = inject()
+            override fun onReceivedError(view: WebView, req: WebResourceRequest, err: android.webkit.WebResourceError) {
+                if (req.isForMainFrame) error("Error ${err.errorCode}: ${err.description}")
+            }
+            override fun onReceivedHttpError(view: WebView, req: WebResourceRequest, res: WebResourceResponse) {
+                if (req.isForMainFrame) error("HTTP ${res.statusCode}")
+            }
+            override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+                error("WebView crashed. Restart the app.")
+                return true
+            }
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                lastError = ""; updateDiag()
                 // A new page loses all running JS calls: fail them now, so no caller waits forever.
                 pending.values.forEach { it.completeExceptionally(IllegalStateException("WhatsApp Web reloaded. Try again.")) }
             }
@@ -130,6 +133,14 @@ class WaEngine(context: Context) {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest) = serveLocal(request)
         }
         webChromeClient = object : WebChromeClient() {
+            override fun onProgressChanged(view: WebView, newProgress: Int) { loadPct = newProgress; updateDiag() }
+            override fun onConsoleMessage(m: android.webkit.ConsoleMessage): Boolean {
+                if (m.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR &&
+                    !m.message().contains("WebSocket") && !m.message().contains("ErrorUtils")) {
+                    error("JS: ${m.message()}")
+                }
+                return false
+            }
             override fun onShowFileChooser(v: WebView?, cb: ValueCallback<Array<Uri>>, p: FileChooserParams): Boolean =
                 fileChooser?.invoke(p, cb) ?: false
         }

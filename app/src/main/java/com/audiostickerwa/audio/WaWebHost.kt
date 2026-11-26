@@ -10,7 +10,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -43,9 +51,23 @@ fun WaWebHost(engine: WaEngine, visible: Boolean, onClose: () -> Unit, modifier:
     }
     if (visible) BackHandler(onBack = onClose)
 
-    Box(if (visible) modifier.fillMaxSize() else modifier.size(1.dp)) {
+    val diag by engine.diagnostics.collectAsStateWithLifecycle()
+    // Always full size (WhatsApp Web lays out badly at a tiny size). When hidden, it is drawn under the app screens.
+    Box(modifier.fillMaxSize().zIndex(if (visible) 1f else -1f)) {
         AndroidView(factory = { engine.webView }, modifier = Modifier.fillMaxSize())
+        if (!visible) {
+            // Hidden: catch every touch that the app screens above do not use, so nothing reaches WhatsApp Web.
+            Box(Modifier.fillMaxSize().pointerInput(Unit) {
+                awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } }
+            })
+        }
         if (visible) {
+            Text(
+                diag,
+                Modifier.align(Alignment.TopStart).fillMaxWidth().background(Color(0xCC000000)).padding(6.dp),
+                color = Color.White, style = MaterialTheme.typography.labelSmall, maxLines = 3,
+            )
+            TextButton(onClick = engine::reload, modifier = Modifier.align(Alignment.BottomStart).padding(16.dp)) { Text("Reload") }
             Button(onClick = onClose, modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp)) { Text("Done") }
         }
     }
