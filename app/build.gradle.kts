@@ -4,21 +4,41 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// ---- Version: change only appVersion. versionCode is made from it (1.2.3 -> 10203).
+val appVersion = "1.0.0"
+val appVersionCode = appVersion.split(".").map { it.toInt() }.let { (a, b, c) -> a * 10000 + b * 100 + c }
+
 android {
-    namespace = "com.audiostickerwa"
+    namespace = "com.kish.wastickers"
     compileSdk = 36
 
     defaultConfig {
         // Change this to your own unique id before you publish.
-        applicationId = "com.audiostickerwa"
+        applicationId = "com.kish.wastickers"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = appVersionCode
+        versionName = appVersion
         // The authority must start with the applicationId.
         val authority = "$applicationId.stickercontentprovider"
         manifestPlaceholders["contentProviderAuthority"] = authority
         buildConfigField("String", "CONTENT_PROVIDER_AUTHORITY", "\"$authority\"")
+        // GitHub repo for the update check (Releases).
+        buildConfigField("String", "GITHUB_REPO", "\"kishore280/audiosticker-wa\"")
+    }
+
+    signingConfigs {
+        // Release key from environment variables (GitHub Actions secrets, or your shell).
+        // Without them, the release build uses the debug key (fine for local tests only).
+        create("release") {
+            val store = System.getenv("RELEASE_STORE_FILE")
+            if (store != null) {
+                storeFile = file(store)
+                storePassword = System.getenv("RELEASE_STORE_PASSWORD")
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
@@ -27,8 +47,8 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // For side-loading and testing only. Use your own release key before you publish to Google Play.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (System.getenv("RELEASE_STORE_FILE") != null) signingConfigs.getByName("release")
+            else signingConfigs.getByName("debug")
         }
     }
     // Compress the Go engine library in the APK (~19 MB -> ~7 MB download); Android unpacks it at install.

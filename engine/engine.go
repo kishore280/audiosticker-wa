@@ -48,7 +48,7 @@ func New(dataDir string, listener Listener) (*Engine, error) {
 		return nil, err
 	}
 	store.DeviceProps.PlatformType = waCompanionReg.DeviceProps_CHROME.Enum()
-	store.SetOSInfo("Audio Sticker Maker", [3]uint32{0, 1, 0})
+	store.SetOSInfo("Sticker Studio", [3]uint32{0, 1, 0})
 
 	db, err := sql.Open("sqlite", "file:"+dataDir+"/session.db?_pragma=foreign_keys(1)&_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)")
 	if err != nil {

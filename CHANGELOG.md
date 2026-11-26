@@ -1,0 +1,26 @@
+# Changelog
+
+All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org).
+
+## [1.0.0] - 2026-11-26
+
+First public release.
+
+### Audio stickers (stickers with sound)
+- Make a sticker with sound from a **video** (its own sound or another sound), a **GIF + sound**, or an **image + sound**.
+- Square preview that looks like the sticker: **Fit** (whole picture) or **Fill** with a square that you can drag.
+- Trim with a range slider and play only the selected part.
+- Works with 4K, HEVC, HDR and rotated videos, and with large or HEIC photos.
+- Sends to any chat (one tap for "Me" and recent chats) through a one-time linked-device connection (link with a phone code).
+- **My audio stickers** library: every sticker you make is saved; hear it, send it again, export it, delete it.
+- Pack name and publisher (Settings) are written in the sticker info.
+- Share a video, GIF, image or sound from another app to start a sticker.
+
+### Sticker packs (official WhatsApp sticker-pack API, no link needed)
+- Still packs from images, and animated packs from videos and GIFs (clip editor: trim, Fit / Fill, move).
+- Numbered slots 1–30, tray icon, 1–3 emojis per sticker.
+- **Add to WhatsApp** and **Add changes to WhatsApp**; asks WhatsApp or WhatsApp Business when both are installed.
+
+### App
+- Check for updates from GitHub Releases.
+- 8 MB APK (arm64).

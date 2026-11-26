@@ -1,57 +1,157 @@
-# Audio Sticker Maker (Android, Kotlin + Jetpack Compose)
+<h1 align="center">Sticker Studio</h1>
 
-An Android app that makes WhatsApp stickers:
+<p align="center">
+  <b>Make WhatsApp stickers with sound on your Android phone.</b><br>
+  Video, GIF or photo + any sound → a sticker that plays its sound when someone taps it.<br>
+  Also makes normal and animated sticker packs. Free and open source.
+</p>
 
-1. **Still sticker packs**: you select images. The app converts each one to a 512×512 WebP (less than 100 KB) and makes the 96×96 tray icon. You push **Add to WhatsApp**.
-2. **Animated sticker packs**: you select videos or GIFs. The app converts the first 8 s of each one to an animated WebP (less than 500 KB). You push **Add to WhatsApp**.
-3. **Audio stickers** (stickers with sound). You can also **share** a video, GIF, image or sound from another app to "Make audio sticker": you select a video, GIF or image, select a sound and trim it. The app makes the sticker on the phone and sends it to any chat. Then you can forward it from the normal WhatsApp app.
+<p align="center">
+  <a href="https://github.com/kishore280/audiosticker-wa/releases/latest"><img alt="Download" src="https://img.shields.io/github/v/release/kishore280/audiosticker-wa?label=Download%20APK&style=for-the-badge&color=00a884"></a>
+  <img alt="Android 7+" src="https://img.shields.io/badge/Android-7%2B-3ddc84?style=for-the-badge&logo=android&logoColor=white">
+  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge"></a>
+</p>
 
-## How it works
+<!-- Screenshots: put PNGs in docs/screenshots/ and list them here, for example:
+<p align="center"><img src="docs/screenshots/home.png" width="230"> <img src="docs/screenshots/maker.png" width="230"> <img src="docs/screenshots/pack.png" width="230"></p>
+-->
 
-### Sticker packs (1 and 2): the official WhatsApp sticker contract
-- `sticker/StickerContentProvider.kt` is a port of the provider in the WhatsApp sample app (`metadata`, `stickers`, `stickers_asset`). It reads packs from the app's files directory, so users can make packs in the app.
-- `sticker/WhatsApp.kt` contains the `ENABLE_STICKER_PACK` intent and the "is the pack added" check.
-- `sticker/AnimatedWebp.kt` extracts frames with `MediaMetadataRetriever` (video) or `Movie` (GIF), encodes each frame with `Bitmap.compress(WEBP)`, and puts the frames in one animated WebP with a small muxer. It uses no native libraries.
-- WhatsApp does not accept mixed packs. Thus you select "Animated pack" when you make a pack.
+> Not affiliated with WhatsApp or Meta. "WhatsApp" is a trademark of WhatsApp LLC.
 
-### Audio stickers (3): own WhatsApp engine (whatsmeow), no browser
-WhatsApp has **no public API** for sound stickers, and the sticker-pack contract has no audio field. A sound sticker is one message:
+---
 
-```
-Message.audioStickerMessage (134) → FutureProofMessage.message → Message.stickerMessage
-  { WebP media, isAnimated, premium = 0, emojis, audioMessage { Ogg/Opus media, ptt = false, seconds } }
-```
-The WebP's EXIF (TIFF tag `0x5741`) holds JSON with `"sound-sha256"` = base64 SHA-256 of the Ogg file.
+## Features
 
-How the app makes and sends it:
-- **Engine:** `engine/` is a small Go package over [whatsmeow](https://github.com/tulir/whatsmeow) (MPL-2.0), the same library that [wacli](https://github.com/openclaw/wacli) uses. `engine/build.sh` builds it with gomobile into `app/libs/waengine.aar`, and Kotlin wraps it in `audio/StickerEngine.kt`. The app is a **linked device** of your WhatsApp. You link it one time with a phone code: WhatsApp shows a notification on the same phone, and you type the code there.
-- **whatsmeow patch:** whatsmeow does not unwrap `audioStickerMessage` when it sets the stanza type. `engine/patch_whatsmeow.py` adds the same unwrap that whatsmeow already does for `lottieStickerMessage`. `build.sh` applies it to a copy of the module.
-- **Sound:** `audio/AudioPipeline.kt` decodes the selected part to mono 48 kHz PCM with MediaCodec and encodes it to Opus with the MediaCodec Opus encoder (Android 10+). `audio/OggOpus.kt` writes the Ogg file.
-- **Picture:** `sticker/AnimatedWebp.kt` makes frames, encodes the animated WebP (less than 950 KB), and adds the EXIF block.
-- **Tests:** `OggOpusTest` and `AnimatedWebpTest`. With real Opus packets and WebP frames from Chromium, the Ogg file decodes to the exact length, and the animated WebP decodes to the correct frames with the EXIF block.
+### 🔊 Audio stickers (stickers with sound)
+- **Video** with its own sound, or with another sound file.
+- **GIF + sound** or **image + sound**.
+- **Square preview = the real sticker.** *Fit* keeps the whole picture; *Fill* makes a square that you **drag** to choose the part.
+- **Trim** with two handles, and play only the selected part.
+- Reads **4K, HEVC, HDR and rotated** phone videos, and large or HEIC photos.
+- **Send** to any chat. One tap for *Me* and your recent chats.
+- **My audio stickers:** every sticker that you make is saved. Hear it, send it again, export it (`.webp` + `.ogg`), or delete it.
+- Your **pack name and publisher** show in the sticker info in WhatsApp.
+- **Share** a video, GIF, image or sound from any app → *Make audio sticker*.
 
-**Risks:**
-- whatsmeow is a third-party client. WhatsApp can ban accounts that use third-party clients. Send stickers by hand only, never in bulk, and test with a second number first.
-- If WhatsApp changes the protocol, update whatsmeow (`go get go.mau.fi/whatsmeow@main` in `engine/`) and run `engine/build.sh` again.
+### 🗂️ Sticker packs (no link needed)
+- **Still packs** from photos, and **animated packs** from videos and GIFs (trim, Fit / Fill, move).
+- Numbered slots 1–30, tray icon, 1–3 emojis per sticker.
+- **Add to WhatsApp**, then **Add changes to WhatsApp** after you edit the pack.
+- Works with WhatsApp and WhatsApp Business.
 
-## Build
+### ⚙️ App
+- **Check for updates** from GitHub Releases, in the app.
+- Small: about **8 MB**. No ads, no tracking, no account, no server.
 
-Requirements: JDK 17+ and the Android SDK (compileSdk 36). The engine AAR is already in `app/libs`.
+---
+
+## Install
+
+1. Download **`StickerStudio-x.y.z.apk`** from the [latest release](https://github.com/kishore280/audiosticker-wa/releases/latest) on your phone.
+2. Open it. If Android asks, allow *Install unknown apps* for your browser or file manager.
+3. Open **Sticker Studio**.
+
+Requirements: Android 7 or newer, a 64-bit phone (almost all phones since 2017).
+Audio stickers need **Android 10 or newer** (for the Opus audio encoder). Sticker packs work on Android 7+.
+
+To check the file, compare its SHA-256 with the `.sha256` file in the release.
+
+---
+
+## How to make an audio sticker
+
+1. Tap **Make an audio sticker**.
+2. Select **Video**, **GIF** or **Image**, and then the file.
+3. For a GIF or an image, select a sound. For a video, its own sound is used (or tap *Use other sound*).
+4. Select **Fit** or **Fill** (drag the picture), and drag the trim handles. 10 seconds or less works best.
+5. Tap **Create sticker**. Tap the sticker to hear it.
+6. Tap **Me** or a chat. Open WhatsApp: the sticker plays its sound, and you can forward it to any chat.
+
+**First time only: link WhatsApp.** Type your phone number with the country code and tap *Get link code*. In WhatsApp, open **Settings → Linked devices → Link a device → Link with phone number instead**, and type the code. Keep Sticker Studio open in the background while you do this (it shows a small notification).
+
+---
+
+## How it works (and why the link is necessary)
+
+WhatsApp's public sticker API for Android (the one sticker-pack apps use) **has no audio**. A sticker with sound is a special message: an animated WebP plus an Ogg/Opus sound in one `StickerMessage`. Only a WhatsApp client can send it.
+
+So Sticker Studio does two things:
+
+| Part | How |
+|---|---|
+| **Sticker packs** | The official WhatsApp sticker-pack contract (a `ContentProvider` and the `ENABLE_STICKER_PACK` intent). No link. |
+| **Make the audio sticker** | On the phone: the video is decoded with `MediaCodec` to 512 px frames, the frames go into an animated WebP (less than 950 KB) with WhatsApp's sticker info (EXIF, including `sound-sha256`), and the sound goes to Opus/Ogg. |
+| **Send the audio sticker** | The app is a **linked device** of your WhatsApp, like WhatsApp Web, through [whatsmeow](https://github.com/tulir/whatsmeow). It sends `audioStickerMessage → stickerMessage { audioMessage }`, the same layout that WhatsApp clients send. |
+
+### Privacy
+- All conversion happens on your phone. There is no server.
+- The link session is kept only in the app's private storage. *Settings → Unlink* removes it, and so does WhatsApp → Linked devices.
+- The app reads your chat list only to show the *Send to* list. It does not read, store or upload your messages.
+- The only other network request is the update check to `api.github.com`.
+
+### ⚠️ Important: risk
+The linked-device connection is **not an official WhatsApp API**. WhatsApp can limit or ban accounts that use unofficial clients. Use audio stickers by hand, for your own chats, **never for bulk or automated messages**. If you can, test with a second number first. Sticker packs use the official API and do not have this risk.
+
+---
+
+## FAQ
+
+**Is it on Google Play?** Not now. Download the APK from Releases. The in-app update check tells you when a new version is available.
+
+**Does it work with WhatsApp Business?** Sticker packs: yes. Audio stickers: link the Business number with the same steps.
+
+**"Logging in…" does not stop when I link.** Keep Sticker Studio running (do not swipe it away) while you type the code. Then tap *New code* and try again.
+
+**A video gives an error.** The message tells you the codec and the size. Videos with DRM (for example streaming downloads) cannot be read. Convert the video to H.264 MP4 and try again.
+
+**Where are my stickers?** In the app (*My audio stickers*). *Export* copies them to `Downloads/AudioStickers`.
+
+---
+
+## Build from source
+
+Requirements: JDK 17, Android SDK (compileSdk 36). The WhatsApp engine (`app/libs/waengine.aar`) is already built.
 
 ```bash
-./gradlew assembleDebug
+./gradlew assembleDebug        # app/build/outputs/apk/debug/
+./gradlew testDebugUnitTest    # unit tests
+./gradlew assembleRelease      # small APK; signed with RELEASE_* env vars, else with the debug key
 ```
 
-To build the engine again (needs Go 1.26+, the Android NDK and python3):
+Rebuild the Go engine (Go 1.26+, Android NDK, python3):
 
 ```bash
 engine/build.sh
 ```
 
-The APK is in `app/build/outputs/apk/debug/`. For a small APK (about 8 MB: R8 shrinking, arm64 only, compressed engine library):
+### Project structure
 
-```bash
-./gradlew assembleRelease
+```
+app/src/main/java/com/kish/wastickers/
+  audio/     audio stickers: maker screen, MediaCodec audio → Opus/Ogg, library, engine wrapper
+  sticker/   sticker packs: ContentProvider, WebP encoder and animated-WebP muxer, video frame reader
+  settings/  sticker names, update check, settings sheet
+  ui/        home screen, pack screen, clip editor
+engine/      Go package over whatsmeow (link by phone code, chats, send sound sticker) → gomobile AAR
 ```
 
-The release build is signed with the debug key so you can side-load it. Use your own key before you publish. Change `applicationId` in `app/build.gradle.kts` before you publish the app. Do not use "WhatsApp" in the app name.
+### Release a new version
+
+1. Change `appVersion` in `app/build.gradle.kts` (for example `1.1.0`) and add a `## [1.1.0]` section to `CHANGELOG.md`.
+2. Commit, then push a tag: `git tag v1.1.0 && git push origin v1.1.0`.
+   (Or *Actions → Release → Run workflow*.)
+3. GitHub Actions builds, signs and publishes the release with the APK. The app's update check finds it.
+
+The release workflow needs 4 repository secrets: `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`. Always use the same key: Android installs an update only when the signing key is the same.
+
+---
+
+## Credits
+
+- [whatsmeow](https://github.com/tulir/whatsmeow) (MPL-2.0) — WhatsApp multi-device protocol in Go.
+- [wacli](https://github.com/openclaw/wacli), [KaraBala10/whatsapp-audio-stickers](https://github.com/KaraBala10/whatsapp-audio-stickers) and [alkhrzmy/wa-sound-sticker](https://github.com/alkhrzmy/wa-sound-sticker) — research on the sound-sticker format.
+- The [WhatsApp sticker sample app](https://github.com/WhatsApp/stickers) — sticker-pack contract.
+
+## License
+
+[MIT](LICENSE). Third-party licenses are listed at the end of the LICENSE file.
