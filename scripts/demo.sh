@@ -10,6 +10,13 @@ adb install -r -g app/build/outputs/apk/debug/app-debug.apk
 # Full log for the whole run (crash reasons), in the background.
 adb logcat -c; adb logcat -v time > "$OUT/logcat-full.txt" 2>/dev/null &
 
+# The emulator's Pixel Launcher often freezes ("isn't responding") under software graphics and its dialog covers the app.
+# Maestro starts the app itself, so turn the launcher off and hide error dialogs.
+adb shell pm disable-user --user 0 com.google.android.apps.nexuslauncher || true
+adb shell settings put global hide_error_dialogs 1 || true
+adb shell am force-stop com.google.android.apps.nexuslauncher || true
+sleep 20
+
 # Clean look: dark mode, visible touches, demo status bar (9:41, full battery, no notifications).
 adb shell cmd uimode night yes
 adb shell settings put system show_touches 1

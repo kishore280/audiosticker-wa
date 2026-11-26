@@ -1,6 +1,10 @@
 # An image was shared: add it to the pack.
 appId: com.kish.wastickers
 ---
+# An Android "isn't responding" dialog must not block the demo.
+- tapOn:
+    text: "Wait"
+    optional: true
 - extendedWaitUntil:
     visible: "Use this image for.*"
     timeout: 30000

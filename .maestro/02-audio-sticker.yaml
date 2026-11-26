@@ -1,6 +1,10 @@
 # A video was shared to the app: make an audio sticker from it.
 appId: com.kish.wastickers
 ---
+# An Android "isn't responding" dialog must not block the demo.
+- tapOn:
+    text: "Wait"
+    optional: true
 - extendedWaitUntil:
     visible: "Use this video for.*"
     timeout: 30000

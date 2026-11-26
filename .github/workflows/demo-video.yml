@@ -48,6 +48,8 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_6
+          cores: 4
+          ram-size: 4096M
           disable-animations: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save
           script: bash scripts/demo.sh
@@ -58,3 +60,4 @@ jobs:
           name: demo-video
           path: demo-out/
           retention-days: 14
+          include-hidden-files: true

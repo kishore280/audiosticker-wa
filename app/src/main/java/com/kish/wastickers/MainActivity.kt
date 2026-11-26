@@ -66,6 +66,38 @@ import com.kish.wastickers.audio.SoundLibrary
 import com.kish.wastickers.audio.SoundSheet
 import com.kish.wastickers.ui.PacksViewModel
 
+/** Full green colour schemes. Only `primary` set would leave Material's default purple in the containers. */
+private val DarkGreen = darkColorScheme(
+    primary = Color(0xFF4FDDB0), onPrimary = Color(0xFF00382A),
+    primaryContainer = Color(0xFF0F4A3B), onPrimaryContainer = Color(0xFFB9F5DE),
+    secondary = Color(0xFFB2CCC1), onSecondary = Color(0xFF1D352C),
+    secondaryContainer = Color(0xFF2C4A40), onSecondaryContainer = Color(0xFFCDE9DD),
+    tertiary = Color(0xFFA4CDE0), onTertiary = Color(0xFF053544),
+    tertiaryContainer = Color(0xFF22495A), onTertiaryContainer = Color(0xFFC2E8FB),
+    background = Color(0xFF0F1513), onBackground = Color(0xFFDEE4E0),
+    surface = Color(0xFF0F1513), onSurface = Color(0xFFDEE4E0),
+    surfaceVariant = Color(0xFF3F4945), onSurfaceVariant = Color(0xFFBFC9C3),
+    surfaceContainerLowest = Color(0xFF0A0F0D), surfaceContainerLow = Color(0xFF171D1B),
+    surfaceContainer = Color(0xFF1B211F), surfaceContainerHigh = Color(0xFF252B29),
+    surfaceContainerHighest = Color(0xFF303634),
+    outline = Color(0xFF89938E), outlineVariant = Color(0xFF3F4945),
+)
+private val LightGreen = lightColorScheme(
+    primary = Color(0xFF00876A), onPrimary = Color(0xFFFFFFFF),
+    primaryContainer = Color(0xFFB6F2DB), onPrimaryContainer = Color(0xFF002118),
+    secondary = Color(0xFF4B635A), onSecondary = Color(0xFFFFFFFF),
+    secondaryContainer = Color(0xFFCDE9DD), onSecondaryContainer = Color(0xFF072019),
+    tertiary = Color(0xFF3F6374), onTertiary = Color(0xFFFFFFFF),
+    tertiaryContainer = Color(0xFFC2E8FB), onTertiaryContainer = Color(0xFF001F29),
+    background = Color(0xFFF5FBF7), onBackground = Color(0xFF171D1B),
+    surface = Color(0xFFF5FBF7), onSurface = Color(0xFF171D1B),
+    surfaceVariant = Color(0xFFDBE5DF), onSurfaceVariant = Color(0xFF3F4945),
+    surfaceContainerLowest = Color(0xFFFFFFFF), surfaceContainerLow = Color(0xFFEFF5F1),
+    surfaceContainer = Color(0xFFE9EFEB), surfaceContainerHigh = Color(0xFFE3EAE6),
+    surfaceContainerHighest = Color(0xFFDEE4E0),
+    outline = Color(0xFF6F7975), outlineVariant = Color(0xFFBFC9C3),
+)
+
 class MainActivity : ComponentActivity() {
     /** Files shared to the app from another app (ACTION_SEND / SEND_MULTIPLE), until the UI takes them. */
     private val shared = MutableStateFlow<List<Uri>>(emptyList())
@@ -94,8 +126,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) takeShared(intent)
         enableEdgeToEdge()
         setContent {
-            val green = Color(0xFF00A884)
-            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme(primary = green) else lightColorScheme(primary = green)) {
+            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) DarkGreen else LightGreen) {
                 Surface(Modifier.fillMaxSize()) {
                     val sharedUris by shared.collectAsStateWithLifecycle()
                     App(sharedUris = sharedUris, onSharedTaken = { shared.value = emptyList() })

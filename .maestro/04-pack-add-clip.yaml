@@ -1,6 +1,10 @@
 # A video or GIF was shared: add it to the pack with the clip editor.
 appId: com.kish.wastickers
 ---
+# An Android "isn't responding" dialog must not block the demo.
+- tapOn:
+    text: "Wait"
+    optional: true
 - extendedWaitUntil:
     visible: "Use this .* for.*"
     timeout: 30000

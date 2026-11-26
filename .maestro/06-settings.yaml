@@ -1,6 +1,10 @@
 # Home and Settings.
 appId: com.kish.wastickers
 ---
+# An Android "isn't responding" dialog must not block the demo.
+- tapOn:
+    text: "Wait"
+    optional: true
 - back
 - extendedWaitUntil:
     visible: "Sticker packs.*"

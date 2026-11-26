@@ -1,6 +1,10 @@
 # Make an animated sticker pack.
 appId: com.kish.wastickers
 ---
+# An Android "isn't responding" dialog must not block the demo.
+- tapOn:
+    text: "Wait"
+    optional: true
 - scrollUntilVisible:
     element: "New pack"
     direction: DOWN
