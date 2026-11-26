@@ -115,6 +115,7 @@ fun AudioMakerScreen(
         onRemoveAudio = { maker.setAudio(null) },
         onRangeChange = maker::changeRange,
         onCropChange = maker::changeCrop,
+        onPosition = maker::changePosition,
         onCreate = maker::create,
         onQuickSend = { c -> result?.let { actions.send(it, c) } },
         onMoreChats = { sendSheet = true },
@@ -149,6 +150,7 @@ fun AudioMakerContent(
     onRemoveAudio: () -> Unit,
     onRangeChange: (ClosedFloatingPointRange<Float>) -> Unit,
     onCropChange: (Boolean) -> Unit,
+    onPosition: (Float, Float) -> Unit,
     onCreate: () -> Unit,
     onQuickSend: (WaChat) -> Unit,
     onMoreChats: () -> Unit,
@@ -220,17 +222,10 @@ fun AudioMakerContent(
 
                 // ---- Square preview = the sticker, with live Fit / Fill.
                 ClipPreview(
-                    kind = ui.tab, visual = ui.visual, audio = ui.audio, range = ui.range, crop = ui.crop,
-                    playing = playing, onFinished = { playing = false },
+                    kind = ui.tab, visual = ui.visual, audio = ui.audio, range = ui.range, framing = ui.framing,
+                    playing = playing, onFinished = { playing = false }, onPosition = onPosition,
                 )
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    SegmentedButton(selected = !ui.crop, onClick = { onCropChange(false) }, shape = SegmentedButtonDefaults.itemShape(0, 2)) {
-                        Text("Fit (whole picture)")
-                    }
-                    SegmentedButton(selected = ui.crop, onClick = { onCropChange(true) }, shape = SegmentedButtonDefaults.itemShape(1, 2)) {
-                        Text("Fill (square)")
-                    }
-                }
+                FramingToggle(ui.framing.crop, onCropChange)
             }
 
             if (ui.timedMs > 0) {
@@ -310,6 +305,20 @@ private fun ResultCard(
                 TextButton(onClick = onExport) { Text("Export") }
                 Button(onClick = onMakeAnother) { Text("Make another") }
             }
+        }
+    }
+}
+
+/** Fit (whole picture) / Fill (square that you can move). Shared with the sticker-pack editor. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FramingToggle(crop: Boolean, onCropChange: (Boolean) -> Unit) {
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        SegmentedButton(selected = !crop, onClick = { onCropChange(false) }, shape = SegmentedButtonDefaults.itemShape(0, 2)) {
+            Text("Fit (whole)")
+        }
+        SegmentedButton(selected = crop, onClick = { onCropChange(true) }, shape = SegmentedButtonDefaults.itemShape(1, 2)) {
+            Text("Fill (drag to move)")
         }
     }
 }

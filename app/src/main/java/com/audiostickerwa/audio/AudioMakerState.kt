@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Movie
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import com.audiostickerwa.sticker.Framing
 import android.provider.OpenableColumns
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
@@ -30,7 +31,7 @@ data class AudioMakerUi(
     val needsAudio: Boolean = false,
     val timedMs: Long = 0,
     val range: ClosedFloatingPointRange<Float> = 0f..0f,
-    val crop: Boolean = false,
+    val framing: Framing = Framing(),
     val canCreate: Boolean = false,
     val busy: Boolean = false,
     val error: String? = null,
@@ -58,7 +59,7 @@ class AudioMakerState(
     var audio by mutableStateOf<Media?>(null); private set
     /** Trim range in ms on the timed source (separate audio if set, else the video). */
     var range by mutableStateOf(0f..0f); private set
-    var crop by mutableStateOf(false); private set
+    var framing by mutableStateOf(Framing()); private set
     var busy by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null)
     var result by mutableStateOf<SavedSound?>(null); private set
@@ -66,7 +67,7 @@ class AudioMakerState(
     /** Immutable snapshot for the stateless content composable. */
     fun ui() = AudioMakerUi(
         tab = tab, visual = visual, audio = audio,
-        needsAudio = needsAudio, timedMs = timedDurationMs, range = range, crop = crop,
+        needsAudio = needsAudio, timedMs = timedDurationMs, range = range, framing = framing,
         canCreate = canCreate, busy = busy, error = error, result = result,
     )
 
@@ -86,13 +87,18 @@ class AudioMakerState(
 
     /** A new trim or crop makes the old sticker out of date. */
     fun changeRange(r: ClosedFloatingPointRange<Float>) { if (r != range) { range = r; clearResult() } }
-    fun changeCrop(c: Boolean) { if (c != crop) { crop = c; clearResult() } }
+    fun changeCrop(c: Boolean) { if (c != framing.crop) { framing = framing.copy(crop = c); clearResult() } }
+    /** Moves the Fill square; x, y are 0..1 (0.5 = centre). */
+    fun changePosition(x: Float, y: Float) {
+        val f = framing.copy(x = x.coerceIn(0f, 1f), y = y.coerceIn(0f, 1f))
+        if (f != framing) { framing = f; clearResult() }
+    }
     private fun clearResult() { if (!busy) result = null }
 
     /** Starts again with an empty form (the made sticker stays in the library). */
     fun reset() {
         if (busy) return
-        visual = null; audio = null; result = null; error = null; crop = false
+        visual = null; audio = null; result = null; error = null; framing = Framing()
         resetRange()
     }
 
@@ -101,31 +107,17 @@ class AudioMakerState(
     fun create() { if (!busy) scope.launch { doCreate() } }
 
     private suspend fun loadVisual(uri: Uri) {
-        val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
-        val kind = when {
-            mime.startsWith("video/") -> VisualKind.Video
-            mime == "image/gif" -> VisualKind.Gif
-            else -> VisualKind.Image
-        }
-        val (dur, size) = withContext(Dispatchers.IO) {
-            when (kind) {
-                VisualKind.Video -> mediaDuration(uri) to videoSize(uri)
-                VisualKind.Gif -> gifDuration(uri) to imageSize(uri)
-                VisualKind.Image -> 0L to imageSize(uri)
-            }
-        }
-        visual = Media(uri, mime, dur, displayName(uri), size.first, size.second)
+        val (kind, media) = MediaProbe.visual(context, uri)
+        visual = media
         visualKind = kind
         tab = kind
+        framing = framing.copy(x = 0.5f, y = 0.5f)
         result = null
         resetRange()
     }
 
     private suspend fun loadAudio(uri: Uri?) {
-        audio = uri?.let {
-            val mime = context.contentResolver.getType(it) ?: "audio/mpeg"
-            Media(it, mime, withContext(Dispatchers.IO) { mediaDuration(it) }, displayName(it))
-        }
+        audio = uri?.let { MediaProbe.audio(context, it) }
         result = null
         resetRange()
     }
@@ -142,7 +134,7 @@ class AudioMakerState(
         try {
             val spec = SoundStickerSpec(
                 visual = v, kind = visualKind, audio = audio,
-                startMs = range.start.toLong(), durMs = (range.endInclusive - range.start).toLong(), crop = crop,
+                startMs = range.start.toLong(), durMs = (range.endInclusive - range.start).toLong(), framing = framing,
             )
             val seconds = withContext(Dispatchers.Default) {
                 SoundStickerMaker.make(context, spec, dir) { p -> progress = p }
@@ -156,44 +148,6 @@ class AudioMakerState(
             progress = null
         }
     }
-
-    private fun mediaDuration(uri: Uri): Long {
-        val r = MediaMetadataRetriever()
-        return try {
-            r.setDataSource(context, uri)
-            r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-        } catch (e: Exception) { 0L } finally { try { r.release() } catch (_: Exception) {} }
-    }
-
-    private fun videoSize(uri: Uri): Pair<Int, Int> {
-        val r = MediaMetadataRetriever()
-        return try {
-            r.setDataSource(context, uri)
-            val w = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
-            val h = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
-            val rot = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-            if (rot == 90 || rot == 270) h to w else w to h
-        } catch (e: Exception) { 0 to 0 } finally { try { r.release() } catch (_: Exception) {} }
-    }
-
-    private fun imageSize(uri: Uri): Pair<Int, Int> = try {
-        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, o) }
-        o.outWidth.coerceAtLeast(0) to o.outHeight.coerceAtLeast(0)
-    } catch (e: Exception) { 0 to 0 }
-
-    @Suppress("DEPRECATION")
-    private fun gifDuration(uri: Uri): Long {
-        val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return 0
-        return Movie.decodeByteArray(bytes, 0, bytes.size)?.duration()?.toLong()?.takeIf { it > 0 } ?: 1000L
-    }
-
-    private fun displayName(uri: Uri): String = try {
-        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-            if (c.moveToFirst()) c.getString(0) else null
-        }
-    } catch (e: Exception) { null } ?: (uri.lastPathSegment ?: "file")
-
 
     companion object {
         const val DEFAULT_LEN_MS = 5000f

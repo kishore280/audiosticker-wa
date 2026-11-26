@@ -21,6 +21,13 @@ import java.io.ByteArrayOutputStream
  * WhatsApp limits for animated stickers: 512x512, < 500 KB, total duration <= 10 s,
  * each frame >= 8 ms.
  */
+/**
+ * How the picture goes into the 512×512 square.
+ * Fit: the whole picture, transparent bars. Fill ([crop]): a square cut; [x], [y] (0..1) place the cut
+ * along the long side (0 = left/top, 0.5 = centre, 1 = right/bottom).
+ */
+data class Framing(val crop: Boolean = false, val x: Float = 0.5f, val y: Float = 0.5f)
+
 object AnimatedWebp {
     const val SIZE = 512
     const val MAX_BYTES = 500 * 1024
@@ -40,7 +47,7 @@ object AnimatedWebp {
      * (codec and size included) when the video cannot be read.
      */
     fun fromVideo(
-        ctx: Context, uri: Uri, startMs: Long = 0, maxMs: Long = MAX_DURATION_MS, crop: Boolean = false,
+        ctx: Context, uri: Uri, startMs: Long = 0, maxMs: Long = MAX_DURATION_MS, framing: Framing = Framing(),
         maxFrames: Int = MAX_FRAMES, onProgress: (Float) -> Unit = {},
     ): Frames {
         val r = MediaMetadataRetriever()
@@ -58,14 +65,14 @@ object AnimatedWebp {
             // 1. Decode the clip one time with MediaCodec (fast; 4K / HEVC / HDR / rotation).
             var lastError: Throwable? = null
             try {
-                val frames = VideoFrameReader.read(ctx, uri, startMs, useMs, MAX_FPS, maxFrames, crop, SIZE, onProgress)
+                val frames = VideoFrameReader.read(ctx, uri, startMs, useMs, MAX_FPS, maxFrames, framing, SIZE, onProgress)
                 if (frames.isNotEmpty()) return Frames(frames, maxOf(8, (useMs / frames.size).toInt()))
             } catch (e: Throwable) {
                 lastError = e
             }
             // 2. Fallback: MediaMetadataRetriever, one frame at a time.
             // Fit: the frame fits in 512. Fill: the shorter side must still be >= 512 after the cut.
-            val bound = if (crop) SIZE * 2 else SIZE
+            val bound = if (framing.crop) SIZE * 2 else SIZE
             val out = ArrayList<Bitmap>(count)
             for (i in 0 until count) {
                 val us = (startMs + i * step + step / 2) * 1000
@@ -74,7 +81,7 @@ object AnimatedWebp {
                         ?: frameAt(r, us, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, bound)
                 } catch (e: Throwable) { lastError = e; null }
                 if (f != null) {
-                    out.add(scale(f, crop))
+                    out.add(scale(f, framing))
                     f.recycle()
                 }
                 onProgress((i + 1f) / count)
@@ -114,7 +121,7 @@ object AnimatedWebp {
     }
 
     @Suppress("DEPRECATION")
-    fun fromGif(ctx: Context, uri: Uri, crop: Boolean = false, maxFrames: Int = MAX_FRAMES): Frames? {
+    fun fromGif(ctx: Context, uri: Uri, framing: Framing = Framing(), maxFrames: Int = MAX_FRAMES): Frames? {
         val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
         val movie = Movie.decodeByteArray(bytes, 0, bytes.size) ?: return null
         if (movie.width() <= 0 || movie.height() <= 0) return null
@@ -129,7 +136,7 @@ object AnimatedWebp {
             full.eraseColor(Color.TRANSPARENT)
             movie.setTime((i * step).toInt())
             movie.draw(c, 0f, 0f)
-            out.add(scale(full, crop))
+            out.add(scale(full, framing))
         }
         full.recycle()
         return Frames(out, maxOf(8, (useMs / count).toInt()))
@@ -163,14 +170,18 @@ object AnimatedWebp {
      * fit: the longer side becomes 512 (letterbox is added at encode time).
      * crop: the shorter side becomes 512 and the centre 512x512 is kept.
      */
-    fun scale(src: Bitmap, crop: Boolean = false): Bitmap {
+    fun scale(src: Bitmap, framing: Framing = Framing()): Bitmap {
+        val crop = framing.crop
         val s = if (crop) maxOf(SIZE.toFloat() / src.width, SIZE.toFloat() / src.height)
         else minOf(SIZE.toFloat() / src.width, SIZE.toFloat() / src.height)
         val w = (src.width * s).toInt().coerceAtLeast(1)
         val h = (src.height * s).toInt().coerceAtLeast(1)
         val scaled = Bitmap.createScaledBitmap(src, w, h, true)
         if (!crop || (w <= SIZE && h <= SIZE)) return scaled
-        val out = Bitmap.createBitmap(scaled, (w - minOf(w, SIZE)) / 2, (h - minOf(h, SIZE)) / 2, minOf(w, SIZE), minOf(h, SIZE))
+        val cw = minOf(w, SIZE); val ch = minOf(h, SIZE)
+        val left = ((w - cw) * framing.x.coerceIn(0f, 1f)).toInt()
+        val top = ((h - ch) * framing.y.coerceIn(0f, 1f)).toInt()
+        val out = Bitmap.createBitmap(scaled, left, top, cw, ch)
         if (out !== scaled) scaled.recycle()
         return out
     }

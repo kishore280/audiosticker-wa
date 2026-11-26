@@ -30,10 +30,13 @@ object WhatsApp {
             if (pkg != null) setPackage(pkg)
         }
 
-    /** True when the pack is in every installed WhatsApp app (consumer and/or business). */
+    /** Installed WhatsApp apps, as (package, name). */
+    fun installedApps(ctx: Context): List<Pair<String, String>> =
+        listOf(CONSUMER to "WhatsApp", BUSINESS to "WhatsApp Business").filter { isInstalled(ctx, it.first) }
+
+    /** True when the pack is in at least one installed WhatsApp app. */
     suspend fun isAdded(ctx: Context, packId: String): Boolean = withContext(Dispatchers.IO) {
-        val apps = listOf(CONSUMER, BUSINESS).filter { isInstalled(ctx, it) }
-        apps.isNotEmpty() && apps.all { query(ctx, it, packId) }
+        installedApps(ctx).any { query(ctx, it.first, packId) }
     }
 
     private fun query(ctx: Context, pkg: String, packId: String): Boolean {

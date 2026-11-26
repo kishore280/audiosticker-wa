@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.util.Base64
 import com.audiostickerwa.sticker.AnimatedWebp
+import com.audiostickerwa.sticker.Framing
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -19,7 +20,7 @@ data class SoundStickerSpec(
     val audio: Media?,
     val startMs: Long,
     val durMs: Long,
-    val crop: Boolean,
+    val framing: Framing,
 )
 
 /**
@@ -59,12 +60,12 @@ object SoundStickerMaker {
             VisualKind.Video -> {
                 // Own sound: the trimmed part. Other sound: the video from 0, as long as the sound.
                 val start = if (spec.audio == null) spec.startMs else 0L
-                AnimatedWebp.fromVideo(ctx, spec.visual.uri, start, spec.durMs, spec.crop, MAX_FRAMES) { f ->
+                AnimatedWebp.fromVideo(ctx, spec.visual.uri, start, spec.durMs, spec.framing, MAX_FRAMES) { f ->
                     progress("Reading the picture… ${(f * 100).toInt()}%")
                 }
             }
-            VisualKind.Gif -> AnimatedWebp.fromGif(ctx, spec.visual.uri, spec.crop, MAX_FRAMES)
-            VisualKind.Image -> stillFrames(ctx, spec.visual.uri, spec.crop)
+            VisualKind.Gif -> AnimatedWebp.fromGif(ctx, spec.visual.uri, spec.framing, MAX_FRAMES)
+            VisualKind.Image -> stillFrames(ctx, spec.visual.uri, spec.framing)
         } ?: error("Cannot read the picture (${ctx.contentResolver.getType(spec.visual.uri) ?: "unknown format"}).")
 
         progress("Encoding the sticker…")
@@ -84,9 +85,9 @@ object SoundStickerMaker {
     }
 
     /** An image as a 2-frame animation (WhatsApp sound stickers are animated). */
-    private fun stillFrames(ctx: Context, uri: Uri, crop: Boolean): AnimatedWebp.Frames? {
-        val src = AnimatedWebp.loadImage(ctx, uri, if (crop) 1024 else 512) ?: return null
-        val f = AnimatedWebp.scale(src, crop)
+    private fun stillFrames(ctx: Context, uri: Uri, framing: Framing): AnimatedWebp.Frames? {
+        val src = AnimatedWebp.loadImage(ctx, uri, if (framing.crop) 1536 else 512) ?: return null
+        val f = AnimatedWebp.scale(src, framing)
         if (f !== src) src.recycle()
         return AnimatedWebp.Frames(listOf(f, f.copy(f.config ?: Bitmap.Config.ARGB_8888, false)), 1000)
     }

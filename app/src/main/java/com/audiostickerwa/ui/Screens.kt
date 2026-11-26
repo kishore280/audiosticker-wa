@@ -62,7 +62,7 @@ fun HomeContent(
     sounds: List<SavedSound>,
     packs: List<StickerPack>,
     added: Map<String, Boolean>,
-    trayFile: (StickerPack) -> File,
+    fileOf: (packId: String, name: String) -> File,
     linkedPhone: String?,
     snackbar: SnackbarHostState,
     onNewAudioSticker: () -> Unit,
@@ -133,7 +133,7 @@ fun HomeContent(
                 }
             }
             items(packs, key = { it.id }) { p ->
-                PackRow(p, added[p.id] == true, trayFile(p), onClick = { onOpenPack(p.id) })
+                PackRow(p, added[p.id] == true, { name -> fileOf(p.id, name) }, onClick = { onOpenPack(p.id) })
             }
         }
     }
@@ -161,16 +161,32 @@ private fun EmptyNote(text: String) {
 }
 
 @Composable
-private fun PackRow(pack: StickerPack, isAdded: Boolean, tray: File, onClick: () -> Unit) {
+private fun PackRow(pack: StickerPack, isAdded: Boolean, fileOf: (String) -> File, onClick: () -> Unit) {
     Card(Modifier.fillMaxWidth().clickable(onClick = onClick)) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            StickerImage(tray, null, Modifier.size(48.dp))
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(pack.name, style = MaterialTheme.typography.titleSmall)
-                Text("${pack.publisher} · ${pack.stickers.size} stickers" + if (pack.animated) " · animated" else "", style = MaterialTheme.typography.bodySmall)
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(pack.name, style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "${pack.publisher} · ${pack.stickers.size} stickers" + if (pack.animated) " · animated" else "",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                Text(
+                    when (pack.status(isAdded)) {
+                        PackStatus.InWhatsApp -> "✓ In WhatsApp"
+                        PackStatus.HasChanges -> "Changes to add"
+                        PackStatus.NotAdded -> "Not added"
+                        PackStatus.NeedsMore -> "Needs ${StickerPack.MIN_STICKERS - pack.stickers.size} more"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (pack.status(isAdded) == PackStatus.InWhatsApp) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            if (isAdded) Text("Added", color = MaterialTheme.colorScheme.primary)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                pack.stickers.take(5).forEach { s -> StickerImage(fileOf(s.file), null, Modifier.weight(1f).aspectRatio(1f)) }
+                repeat(5 - minOf(5, pack.stickers.size)) { Spacer(Modifier.weight(1f)) }
+            }
         }
     }
 }
@@ -204,80 +220,3 @@ private fun CreatePackDialog(onDismiss: () -> Unit, onCreate: (String, String, B
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun PackDetailContent(
-    pack: StickerPack,
-    isAdded: Boolean,
-    busy: Boolean,
-    stickerFile: (String) -> File,
-    snackbar: SnackbarHostState,
-    onBack: () -> Unit,
-    onAddImages: () -> Unit,
-    onRemoveSticker: (String) -> Unit,
-    onAddToWhatsApp: () -> Unit,
-    onDeletePack: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var confirmDelete by remember { mutableStateOf(false) }
-    Scaffold(
-        modifier = modifier,
-        topBar = {
-            TopAppBar(
-                title = { Text(pack.name) },
-                navigationIcon = { TextButton(onClick = onBack) { Text("Back") } },
-                actions = { TextButton(onClick = { confirmDelete = true }) { Text("Delete") } },
-            )
-        },
-        snackbarHost = { SnackbarHost(snackbar) },
-    ) { pad ->
-        Column(Modifier.padding(pad).fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(
-                "${pack.stickers.size} / ${StickerPack.MAX_STICKERS} stickers. WhatsApp needs ${StickerPack.MIN_STICKERS} or more. " +
-                    (if (pack.animated) "Videos and GIFs become animated 512×512 WebP (< 500 KB, first 8 s). "
-                    else "Images become 512×512 WebP (< 100 KB). ") + "Tap a sticker to remove it.",
-                style = MaterialTheme.typography.bodySmall,
-            )
-            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = onAddImages, enabled = !busy && pack.stickers.size < StickerPack.MAX_STICKERS) {
-                    Text(if (pack.animated) "Add video / GIF" else "Add images")
-                }
-                FilledTonalButton(onClick = onAddToWhatsApp, enabled = !busy && pack.canAddToWhatsApp && !isAdded) {
-                    Text(if (isAdded) "Added to WhatsApp" else "Add to WhatsApp")
-                }
-            }
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(96.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(pack.stickers, key = { it.file }) { s ->
-                    var ask by remember { mutableStateOf(false) }
-                    AnimatedStickerImage(
-                        stickerFile(s.file), "sticker",
-                        Modifier.aspectRatio(1f).clip(RoundedCornerShape(8.dp)).background(Color(0x22888888))
-                            .clickable { ask = true },
-                    )
-                    if (ask) {
-                        AlertDialog(
-                            onDismissRequest = { ask = false },
-                            title = { Text("Remove this sticker?") },
-                            confirmButton = { TextButton(onClick = { ask = false; onRemoveSticker(s.file) }) { Text("Remove") } },
-                            dismissButton = { TextButton(onClick = { ask = false }) { Text("Cancel") } },
-                        )
-                    }
-                }
-            }
-        }
-    }
-    if (confirmDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmDelete = false },
-            title = { Text("Delete \"${pack.name}\"?") },
-            text = { Text("This removes the pack from this app. WhatsApp can keep its copy.") },
-            confirmButton = { TextButton(onClick = { confirmDelete = false; onDeletePack() }) { Text("Delete") } },
-            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
-        )
-    }
-}

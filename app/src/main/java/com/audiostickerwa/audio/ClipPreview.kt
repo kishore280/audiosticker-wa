@@ -1,18 +1,25 @@
 package com.audiostickerwa.audio
 
+import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
+import android.os.Build
+import android.view.Surface
+import android.view.TextureView
 import android.widget.ImageView
-import android.widget.VideoView
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -30,20 +37,24 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.audiostickerwa.sticker.Framing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 /**
- * Square preview that looks like the sticker will look: 512×512, with Fit (whole picture, transparent bars)
- * or Fill (centre cut to a square). When [playing] is true it plays only the trimmed part (video sound, or
- * the separate audio file) and then calls [onFinished].
- * The VideoView and MediaPlayer are UI runtime objects: this composable owns and releases them.
+ * Square preview that looks like the sticker will look (512×512): Fit (whole picture, transparent bars) or
+ * Fill (a square cut). In Fill, the user drags the picture to choose the cut; [onPosition] gets x, y in 0..1.
+ * When [playing] is true it plays only the trimmed part and then calls [onFinished].
+ *
+ * Video uses a TextureView (a SurfaceView cannot be clipped to the square). The MediaPlayers are UI
+ * runtime objects: this composable owns and releases them.
  */
 @Composable
 fun ClipPreview(
@@ -51,35 +62,38 @@ fun ClipPreview(
     visual: Media,
     audio: Media?,
     range: ClosedFloatingPointRange<Float>,
-    crop: Boolean,
+    framing: Framing,
     playing: Boolean,
     onFinished: () -> Unit,
+    onPosition: (Float, Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    var video by remember(visual.uri, audio?.uri) { mutableStateOf<VideoView?>(null) }
-    val player = remember(audio?.uri) { audio?.let { a -> try { MediaPlayer.create(context, a.uri) } catch (e: Exception) { null } } }
-    DisposableEffect(player) { onDispose { player?.release() } }
+    var videoPlayer by remember(visual.uri, audio?.uri) { mutableStateOf<MediaPlayer?>(null) }
+    val soundPlayer = remember(audio?.uri) { audio?.let { a -> try { MediaPlayer.create(context, a.uri) } catch (e: Exception) { null } } }
+    DisposableEffect(soundPlayer) { onDispose { soundPlayer?.release() } }
     val finished by rememberUpdatedState(onFinished)
+    val latestFraming by rememberUpdatedState(framing)
+    val latestOnPosition by rememberUpdatedState(onPosition)
 
     // Show the first frame of the trimmed part when the start handle moves.
-    LaunchedEffect(video, range.start, playing) {
-        if (!playing) video?.let { it.pause(); it.seekTo(range.start.toInt()) }
+    LaunchedEffect(videoPlayer, range.start, playing) {
+        if (!playing) videoPlayer?.let { if (it.isPlaying) it.pause(); it.seekPrecise(range.start.toLong()) }
     }
 
     // Play from start to end, then stop.
-    LaunchedEffect(playing, video, player) {
-        if (!playing) { player?.takeIf { it.isPlaying }?.pause(); return@LaunchedEffect }
-        val start = range.start.toInt()
+    LaunchedEffect(playing, videoPlayer, soundPlayer) {
+        if (!playing) { soundPlayer?.takeIf { it.isPlaying }?.pause(); return@LaunchedEffect }
+        val start = range.start.toLong()
         val end = range.endInclusive.toInt()
-        val v = video
-        if (player != null) {
-            player.seekTo(start); player.start()
+        val v = videoPlayer
+        if (soundPlayer != null) {
+            soundPlayer.seekTo(start.toInt()); soundPlayer.start()
             v?.let { it.seekTo(0); it.start() }
-            while (player.isPlaying && player.currentPosition < end) delay(40)
-            player.pause(); v?.pause()
+            while (soundPlayer.isPlaying && soundPlayer.currentPosition < end) delay(40)
+            soundPlayer.pause(); v?.pause()
         } else if (v != null) {
-            v.seekTo(start); v.start()
+            v.seekPrecise(start); v.start()
             while (v.isPlaying && v.currentPosition < end) delay(40)
             v.pause()
         }
@@ -93,38 +107,56 @@ fun ClipPreview(
         contentAlignment = Alignment.Center,
     ) {
         val side = maxWidth
+        val ar = if (visual.width > 0 && visual.height > 0) visual.width.toFloat() / visual.height
+        else if (kind == VisualKind.Video) 16f / 9f else 1f
+        // Content size: Fit = inside the square; Fill = covers the square (one side larger).
+        val (cw, ch) = if (framing.crop == (ar > 1f)) (side * ar) to side else side to (side / ar)
+        val overX = cw - side
+        val overY = ch - side
+        val density = LocalDensity.current
+        val content = Modifier
+            .requiredSize(cw, ch)
+            .offset(x = if (framing.crop) overX * (0.5f - framing.x) else 0.dp, y = if (framing.crop) overY * (0.5f - framing.y) else 0.dp)
+
         when (kind) {
-            VisualKind.Video -> {
-                // VideoView keeps the aspect ratio inside its size: give it the exact size the sticker shows.
-                val ar = if (visual.width > 0 && visual.height > 0) visual.width.toFloat() / visual.height else 16f / 9f
-                val (w, h) = if (crop == (ar > 1f)) (side * ar) to side else side to (side / ar)
-                // AndroidView runs its factory once: a new video or sound choice needs a new VideoView.
-                key(visual.uri, audio?.uri) {
-                    AndroidView(
-                        modifier = Modifier.requiredSize(w, h),
-                        factory = { ctx ->
-                            VideoView(ctx).apply {
-                                setVideoURI(visual.uri)
-                                setOnPreparedListener { mp ->
-                                    if (audio != null) mp.setVolume(0f, 0f) // separate sound: the video is silent
-                                    mp.isLooping = audio != null
-                                    video = this
+            VisualKind.Video -> key(visual.uri, audio?.uri) {
+                AndroidView(
+                    modifier = content,
+                    factory = { ctx ->
+                        TextureView(ctx).apply {
+                            surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+                                override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+                                    val mp = MediaPlayer()
+                                    try {
+                                        mp.setDataSource(ctx, visual.uri)
+                                        mp.setSurface(Surface(st))
+                                        if (audio != null) mp.setVolume(0f, 0f) // separate sound: the video is silent
+                                        mp.isLooping = audio != null
+                                        mp.setOnPreparedListener { p -> p.seekPrecise(range.start.toLong()); videoPlayer = p }
+                                        mp.prepareAsync()
+                                        tag = mp
+                                    } catch (e: Exception) { mp.release() }
                                 }
+                                override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
+                                override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+                                    (tag as? MediaPlayer)?.release(); tag = null; videoPlayer = null
+                                    return true
+                                }
+                                override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
                             }
-                        },
-                        onRelease = { it.stopPlayback() },
-                    )
-                }
+                        }
+                    },
+                    onRelease = { v -> (v.tag as? MediaPlayer)?.release(); v.tag = null },
+                )
             }
             VisualKind.Gif -> AndroidView(
-                modifier = Modifier.requiredSize(side, side),
-                factory = { ctx -> ImageView(ctx) },
+                modifier = content,
+                factory = { ctx -> ImageView(ctx).apply { scaleType = ImageView.ScaleType.FIT_XY } },
                 update = { iv ->
-                    iv.scaleType = if (crop) ImageView.ScaleType.CENTER_CROP else ImageView.ScaleType.FIT_CENTER
                     if (iv.tag != visual.uri) {
                         iv.tag = visual.uri
                         val d = try {
-                            if (android.os.Build.VERSION.SDK_INT >= 28) android.graphics.ImageDecoder.decodeDrawable(
+                            if (Build.VERSION.SDK_INT >= 28) android.graphics.ImageDecoder.decodeDrawable(
                                 android.graphics.ImageDecoder.createSource(iv.context.contentResolver, visual.uri),
                             ) else null
                         } catch (e: Exception) { null }
@@ -134,20 +166,48 @@ fun ClipPreview(
                 },
             )
             VisualKind.Image -> {
-                val px = with(LocalDensity.current) { side.roundToPx() }
+                val px = with(density) { maxOf(cw, ch).roundToPx() }
                 val bmp by produceState<ImageBitmap?>(null, visual.uri) {
-                    value = withContext(Dispatchers.IO) { decodeSampled(context, visual, px) }
+                    value = withContext(Dispatchers.IO) {
+                        com.audiostickerwa.sticker.AnimatedWebp.loadImage(context, visual.uri, maxOf(px, 512))?.asImageBitmap()
+                    }
                 }
-                bmp?.let {
-                    Image(it, null, Modifier.requiredSize(side, side), contentScale = if (crop) ContentScale.Crop else ContentScale.Fit)
-                }
+                bmp?.let { Image(it, null, content, contentScale = ContentScale.FillBounds) }
             }
         }
+
+        // Fill: drag to move the picture inside the square.
+        if (framing.crop && (overX > 0.dp || overY > 0.dp)) {
+            Box(
+                Modifier.matchParentSize().pointerInput(overX, overY) {
+                    val ox = overX.toPx(); val oy = overY.toPx()
+                    detectDragGestures { change, drag ->
+                        change.consume()
+                        val f = latestFraming
+                        // Dragging the picture right shows more of its left side (x goes down).
+                        val nx = if (ox > 0f) f.x - drag.x / ox else f.x
+                        val ny = if (oy > 0f) f.y - drag.y / oy else f.y
+                        latestOnPosition(nx.coerceIn(0f, 1f), ny.coerceIn(0f, 1f))
+                    }
+                },
+            )
+            Text(
+                "Drag to move",
+                Modifier.align(Alignment.BottomCenter).padding(8.dp).background(Color(0x99000000), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                color = Color.White, style = MaterialTheme.typography.labelSmall,
+            )
+        }
     }
+}
+
+/** Seeks to the exact frame where the phone supports it (Android 8+). */
+private fun MediaPlayer.seekPrecise(ms: Long) {
+    try {
+        if (Build.VERSION.SDK_INT >= 26) seekTo(ms, MediaPlayer.SEEK_CLOSEST) else seekTo(ms.toInt())
+    } catch (_: Exception) {}
 }
 
 /** Dark grey "transparent" background, like an image editor. */
 private val Checker = Color(0xFF2A2D31)
 
-private fun decodeSampled(context: android.content.Context, m: Media, target: Int): ImageBitmap? =
-    com.audiostickerwa.sticker.AnimatedWebp.loadImage(context, m.uri, maxOf(target, 512))?.asImageBitmap()

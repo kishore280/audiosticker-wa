@@ -26,8 +26,13 @@ data class StickerPack(
     val stickers: List<Sticker>,
     /** WhatsApp packs are all-still or all-animated. Animated packs take video and GIF. */
     val animated: Boolean,
+    /** Changes each time the stickers change (WhatsApp reloads the pack when it changes). */
+    val dataVersion: String = "1",
+    /** [dataVersion] at the last successful add to WhatsApp; null = never added from this app. */
+    val addedVersion: String? = null,
 ) {
     val canAddToWhatsApp: Boolean get() = stickers.size in MIN_STICKERS..MAX_STICKERS
+    val hasChangesSinceAdded: Boolean get() = addedVersion != null && addedVersion != dataVersion
 
     companion object {
         const val MIN_STICKERS = 3
@@ -116,6 +121,48 @@ class StickerRepository(private val context: Context) {
             AddResult(added, failed, skipped, firstError)
         }
 
+    /** One video or GIF -> one animated sticker, with trim and framing (from the clip editor). */
+    suspend fun addClip(id: String, uri: Uri, startMs: Long, durMs: Long, framing: Framing): AddResult =
+        withContext(Dispatchers.IO) {
+            val arr = PackStore.load(context)
+            val p = PackStore.find(arr, id) ?: return@withContext AddResult(0, 1, 0, "Pack not found")
+            val stickers = p.getJSONArray("stickers")
+            if (stickers.length() >= StickerPack.MAX_STICKERS) return@withContext AddResult(0, 0, 1)
+            val bytes = try {
+                toAnimatedWebp(uri, startMs, durMs, framing) ?: error("The sticker is too big for WhatsApp (500 KB). Make the part shorter.")
+            } catch (e: Throwable) {
+                return@withContext AddResult(0, 1, 0, e.message ?: e.javaClass.simpleName)
+            }
+            val name = "s_${System.currentTimeMillis()}.webp"
+            File(PackStore.packDir(context, id), name).writeBytes(bytes)
+            stickers.put(JSONObject().put("image_file", name).put("emojis", JSONArray().put(DEFAULT_EMOJI)))
+            writeTray(id, p)
+            PackStore.bumpVersion(p)
+            PackStore.save(context, arr)
+            AddResult(1, 0, 0)
+        }
+
+    /** 1 to 3 emojis for one sticker (WhatsApp uses them for search and categories). */
+    suspend fun setEmojis(id: String, file: String, emojis: List<String>) = withContext(Dispatchers.IO) {
+        val arr = PackStore.load(context)
+        val p = PackStore.find(arr, id) ?: return@withContext
+        val st = p.getJSONArray("stickers")
+        for (i in 0 until st.length()) {
+            val s = st.getJSONObject(i)
+            if (s.getString("image_file") == file) s.put("emojis", JSONArray().also { a -> emojis.take(3).forEach { a.put(it) } })
+        }
+        PackStore.bumpVersion(p)
+        PackStore.save(context, arr)
+    }
+
+    /** WhatsApp accepted the pack at its current version. */
+    suspend fun markAdded(id: String) = withContext(Dispatchers.IO) {
+        val arr = PackStore.load(context)
+        val p = PackStore.find(arr, id) ?: return@withContext
+        p.put("added_version", p.optString("image_data_version", "1"))
+        PackStore.save(context, arr)
+    }
+
     suspend fun removeSticker(id: String, file: String) = withContext(Dispatchers.IO) {
         val arr = PackStore.load(context)
         val p = PackStore.find(arr, id) ?: return@withContext
@@ -164,13 +211,15 @@ class StickerRepository(private val context: Context) {
     }
 
     /** Video or GIF -> animated WebP < 500 KB. A still image becomes a 2-frame "animation". */
-    private fun toAnimatedWebp(uri: Uri): ByteArray? {
+    private fun toAnimatedWebp(
+        uri: Uri, startMs: Long = 0, durMs: Long = AnimatedWebp.MAX_DURATION_MS, framing: Framing = Framing(),
+    ): ByteArray? {
         val mime = context.contentResolver.getType(uri) ?: ""
         val frames = when {
-            mime.startsWith("video/") -> AnimatedWebp.fromVideo(context, uri)
-            mime == "image/gif" -> AnimatedWebp.fromGif(context, uri)
-            mime.startsWith("image/") -> decode(uri, 512)?.let { b ->
-                val f = fitSquare(b, 512); b.recycle()
+            mime.startsWith("video/") -> AnimatedWebp.fromVideo(context, uri, startMs, durMs, framing)
+            mime == "image/gif" -> AnimatedWebp.fromGif(context, uri, framing)
+            mime.startsWith("image/") -> decode(uri, if (framing.crop) 1536 else 512)?.let { b ->
+                val f = if (framing.crop) AnimatedWebp.scale(b, framing) else fitSquare(b, 512); b.recycle()
                 AnimatedWebp.Frames(listOf(f, f.copy(f.config ?: Bitmap.Config.ARGB_8888, false)), 500)
             }
             else -> null
@@ -217,6 +266,8 @@ class StickerRepository(private val context: Context) {
             trayFile = p.optString("tray_image_file", TRAY),
             stickers = list,
             animated = p.optBoolean("animated_sticker_pack", false),
+            dataVersion = p.optString("image_data_version", "1"),
+            addedVersion = p.optString("added_version", "").ifEmpty { null },
         )
     }
 

@@ -30,7 +30,7 @@ object VideoFrameReader {
      */
     fun read(
         ctx: Context, uri: Uri, startMs: Long, durMs: Long, fps: Int, maxFrames: Int,
-        crop: Boolean, side: Int, onProgress: (Float) -> Unit,
+        framing: Framing, side: Int, onProgress: (Float) -> Unit,
     ): List<Bitmap> {
         val ex = MediaExtractor()
         ex.setDataSource(ctx, uri, null)
@@ -86,7 +86,7 @@ object VideoFrameReader {
                     val eos = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
                     if (info.size > 0 && info.presentationTimeUs >= nextUs && info.presentationTimeUs < endUs) {
                         dec.getOutputImage(o)?.use { img ->
-                            out.add(toBitmap(img, rotation, crop, side))
+                            out.add(toBitmap(img, rotation, framing, side))
                             onProgress(out.size.toFloat() / count)
                         }
                         // Skip targets that this frame already covers (low-fps video).
@@ -106,7 +106,8 @@ object VideoFrameReader {
     }
 
     /** YUV image -> ARGB bitmap of the shown size (rotation, Fit or Fill), sampling only the needed pixels. */
-    private fun toBitmap(img: Image, rotation: Int, crop: Boolean, side: Int): Bitmap {
+    private fun toBitmap(img: Image, rotation: Int, framing: Framing, side: Int): Bitmap {
+        val crop = framing.crop
         val cr = img.cropRect
         val srcW = cr.width(); val srcH = cr.height()
         val turned = rotation == 90 || rotation == 270
@@ -119,11 +120,19 @@ object VideoFrameReader {
             val s = side.toFloat() / maxOf(dispW, dispH)
             listOf(dispW, dispH, (dispW * s).roundToInt().coerceAtLeast(1), (dispH * s).roundToInt().coerceAtLeast(1))
         }
-        // The same region in source (not rotated) coordinates; it is centred, so only w/h swap.
+        // The same region in source (not rotated) coordinates. The shown picture is the source turned
+        // clockwise by [rotation], so the position fractions turn the other way.
         val rw = if (turned) regH else regW
         val rh = if (turned) regW else regH
-        val rl = cr.left + (srcW - rw) / 2
-        val rt = cr.top + (srcH - rh) / 2
+        val fx = framing.x.coerceIn(0f, 1f); val fy = framing.y.coerceIn(0f, 1f)
+        val (sfx, sfy) = when (rotation) {
+            90 -> fy to (1f - fx)
+            180 -> (1f - fx) to (1f - fy)
+            270 -> (1f - fy) to fx
+            else -> fx to fy
+        }
+        val rl = cr.left + ((srcW - rw) * sfx).toInt()
+        val rt = cr.top + ((srcH - rh) * sfy).toInt()
         val ow = if (turned) outH else outW
         val oh = if (turned) outW else outH
 

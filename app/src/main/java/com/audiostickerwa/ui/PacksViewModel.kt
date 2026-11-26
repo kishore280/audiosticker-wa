@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.File
+import com.audiostickerwa.sticker.Framing
 
 data class PacksUiState(
     val packs: List<StickerPack> = emptyList(),
@@ -34,8 +35,14 @@ class PacksViewModel(app: Application) : AndroidViewModel(app) {
     fun fileOf(packId: String, name: String): File = repo.fileOf(packId, name)
 
     fun refresh() = viewModelScope.launch {
-        val packs = repo.packs()
+        var packs = repo.packs()
         val added = packs.associate { it.id to WhatsApp.isAdded(getApplication(), it.id) }
+        // Packs added before version tracking: take the current version as the added one.
+        val untracked = packs.filter { added[it.id] == true && it.addedVersion == null }
+        if (untracked.isNotEmpty()) {
+            untracked.forEach { repo.markAdded(it.id) }
+            packs = repo.packs()
+        }
         _state.update { it.copy(packs = packs, added = added) }
     }
 
@@ -61,6 +68,32 @@ class PacksViewModel(app: Application) : AndroidViewModel(app) {
             if (r.skippedFull > 0) append(", ${r.skippedFull} skipped (max ${StickerPack.MAX_STICKERS})")
         }
         _state.update { it.copy(busy = false, message = msg) }
+        refresh()
+    }
+
+    fun addClip(id: String, uri: Uri, startMs: Long, durMs: Long, framing: Framing) = viewModelScope.launch {
+        _state.update { it.copy(busy = true, message = "Converting…") }
+        val r = repo.addClip(id, uri, startMs, durMs, framing)
+        val msg = when {
+            r.added > 0 -> "Sticker added"
+            r.skippedFull > 0 -> "The pack is full (max ${StickerPack.MAX_STICKERS})"
+            else -> "Not added: ${r.firstError ?: "unknown error"}"
+        }
+        _state.update { it.copy(busy = false, message = msg) }
+        refresh()
+    }
+
+    fun setEmojis(id: String, file: String, emojis: List<String>) = viewModelScope.launch {
+        repo.setEmojis(id, file, emojis)
+        refresh()
+    }
+
+    /** Result from WhatsApp's add-pack screen. */
+    fun onWhatsAppResult(id: String, ok: Boolean, alreadyAdded: Boolean, validationError: String?) = viewModelScope.launch {
+        when {
+            ok || alreadyAdded -> { repo.markAdded(id); showMessage(if (alreadyAdded) "Already in WhatsApp ✓" else "Added to WhatsApp ✓") }
+            validationError != null -> showMessage("WhatsApp error: $validationError")
+        }
         refresh()
     }
 

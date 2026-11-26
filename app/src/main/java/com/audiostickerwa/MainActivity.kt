@@ -42,7 +42,10 @@ import com.audiostickerwa.audio.AudioMakerState
 import com.audiostickerwa.audio.StickerEngine
 import com.audiostickerwa.sticker.StickerPack
 import com.audiostickerwa.sticker.WhatsApp
-import com.audiostickerwa.ui.PackDetailContent
+import com.audiostickerwa.ui.PackContent
+import com.audiostickerwa.ui.ClipEditorDialog
+import com.audiostickerwa.ui.WhatsAppChoiceDialog
+import com.audiostickerwa.ui.status
 import com.audiostickerwa.ui.HomeContent
 import com.audiostickerwa.audio.EngineState
 import com.audiostickerwa.audio.SavedSound
@@ -188,47 +191,71 @@ private fun PackScreens(
             LaunchedEffect(state.packs) { if (state.packs.none { it.id == id }) onNavigate("home") }
             return
         }
-        val picker = rememberLauncherForActivityResult(
+        var clipUri by remember { mutableStateOf<Uri?>(null) }
+        var chooseApp by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
+        // Still pack: many images at once. Animated pack: one file; a video or GIF opens the clip editor.
+        val pickImages = rememberLauncherForActivityResult(
             ActivityResultContracts.PickMultipleVisualMedia(StickerPack.MAX_STICKERS),
         ) { uris -> vm.addImages(id, uris) }
-        val addLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
-            if (res.resultCode == Activity.RESULT_CANCELED) {
-                res.data?.getStringExtra("validation_error")?.let { vm.showMessage("WhatsApp error: $it") }
-            }
-            vm.refresh()
+        val pickOne = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+            if (uri == null) return@rememberLauncherForActivityResult
+            val mime = context.contentResolver.getType(uri) ?: ""
+            if (mime.startsWith("video/") || mime == "image/gif") clipUri = uri else vm.addImages(id, listOf(uri))
         }
-        PackDetailContent(
+        val addLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+            vm.onWhatsAppResult(
+                id,
+                ok = res.resultCode == Activity.RESULT_OK,
+                alreadyAdded = res.data?.getBooleanExtra("already_added", false) == true,
+                validationError = res.data?.getStringExtra("validation_error"),
+            )
+        }
+        fun launchAdd(pkg: String) {
+            try {
+                addLauncher.launch(WhatsApp.addPackIntent(pack, pkg))
+            } catch (e: ActivityNotFoundException) {
+                vm.showMessage("This WhatsApp cannot add sticker packs. Update WhatsApp.")
+            }
+        }
+        PackContent(
             pack = pack,
-            isAdded = state.added[id] == true,
+            status = pack.status(state.added[id] == true),
             busy = state.busy,
-            stickerFile = { vm.fileOf(id, it) },
+            fileOf = { vm.fileOf(id, it) },
             snackbar = snackbar,
             onBack = { onNavigate("home") },
-            onAddImages = {
-                val type = if (pack.animated) ActivityResultContracts.PickVisualMedia.ImageAndVideo
-                else ActivityResultContracts.PickVisualMedia.ImageOnly
-                picker.launch(PickVisualMediaRequest(type))
+            onAdd = {
+                if (pack.animated) pickOne.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                else pickImages.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
             },
-            onRemoveSticker = { vm.removeSticker(id, it) },
+            onSetEmojis = { s, e -> vm.setEmojis(id, s.file, e) },
+            onRemoveSticker = { vm.removeSticker(id, it.file) },
             onAddToWhatsApp = {
-                if (!WhatsApp.isInstalled(context, WhatsApp.CONSUMER) && !WhatsApp.isInstalled(context, WhatsApp.BUSINESS)) {
-                    vm.showMessage("WhatsApp is not installed.")
-                } else {
-                    try {
-                        addLauncher.launch(WhatsApp.addPackIntent(pack))
-                    } catch (e: ActivityNotFoundException) {
-                        vm.showMessage("WhatsApp cannot add sticker packs (update WhatsApp).")
-                    }
+                val apps = WhatsApp.installedApps(context)
+                when (apps.size) {
+                    0 -> vm.showMessage("WhatsApp is not installed.")
+                    1 -> launchAdd(apps[0].first)
+                    else -> chooseApp = apps
                 }
             },
             onDeletePack = { vm.deletePack(id); onNavigate("home") },
         )
+        clipUri?.let { uri ->
+            ClipEditorDialog(
+                uri = uri,
+                onAdd = { start, dur, framing -> clipUri = null; vm.addClip(id, uri, start, dur, framing) },
+                onDismiss = { clipUri = null },
+            )
+        }
+        chooseApp?.let { apps ->
+            WhatsAppChoiceDialog(apps, onPick = { pkg -> chooseApp = null; launchAdd(pkg) }, onDismiss = { chooseApp = null })
+        }
     } else {
         HomeContent(
             sounds = sounds,
             packs = state.packs,
             added = state.added,
-            trayFile = { vm.fileOf(it.id, it.trayFile) },
+            fileOf = { packId, name -> vm.fileOf(packId, name) },
             linkedPhone = linkedPhone,
             snackbar = snackbar,
             onNewAudioSticker = onNewAudioSticker,
