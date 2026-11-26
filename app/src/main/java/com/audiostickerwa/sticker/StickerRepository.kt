@@ -24,6 +24,8 @@ data class StickerPack(
     val publisher: String,
     val trayFile: String,
     val stickers: List<Sticker>,
+    /** WhatsApp packs are all-still or all-animated. Animated packs take video and GIF. */
+    val animated: Boolean,
 ) {
     val canAddToWhatsApp: Boolean get() = stickers.size in MIN_STICKERS..MAX_STICKERS
 
@@ -53,7 +55,7 @@ class StickerRepository(private val context: Context) {
 
     fun fileOf(packId: String, name: String): File = File(PackStore.packDir(context, packId), name)
 
-    suspend fun createPack(name: String, publisher: String): String = withContext(Dispatchers.IO) {
+    suspend fun createPack(name: String, publisher: String, animated: Boolean): String = withContext(Dispatchers.IO) {
         val id = "pack_" + System.currentTimeMillis()
         val p = JSONObject()
             .put("identifier", id)
@@ -62,7 +64,7 @@ class StickerRepository(private val context: Context) {
             .put("tray_image_file", TRAY)
             .put("image_data_version", "1")
             .put("avoid_cache", false)
-            .put("animated_sticker_pack", false)
+            .put("animated_sticker_pack", animated)
             .put("stickers", JSONArray())
         val arr = PackStore.load(context)
         arr.put(p)
@@ -90,9 +92,12 @@ class StickerRepository(private val context: Context) {
             var added = 0
             var failed = 0
             var skipped = 0
+            val animated = p.optBoolean("animated_sticker_pack", false)
             for (uri in uris) {
                 if (stickers.length() >= StickerPack.MAX_STICKERS) { skipped++; continue }
-                val bytes = try { toStickerWebp(uri) } catch (e: Exception) { null }
+                val bytes = try {
+                    if (animated) toAnimatedWebp(uri) else toStickerWebp(uri)
+                } catch (e: Throwable) { null }
                 if (bytes == null) { failed++; continue }
                 val name = "s_${System.currentTimeMillis()}_$added.webp"
                 File(dir, name).writeBytes(bytes)
@@ -162,6 +167,25 @@ class StickerRepository(private val context: Context) {
         return null
     }
 
+    /** Video or GIF -> animated WebP < 500 KB. A still image becomes a 2-frame "animation". */
+    private fun toAnimatedWebp(uri: Uri): ByteArray? {
+        val mime = context.contentResolver.getType(uri) ?: ""
+        val frames = when {
+            mime.startsWith("video/") -> AnimatedWebp.fromVideo(context, uri)
+            mime == "image/gif" -> AnimatedWebp.fromGif(context, uri)
+            mime.startsWith("image/") -> decode(uri, 512)?.let { b ->
+                val f = fitSquare(b, 512); b.recycle()
+                AnimatedWebp.Frames(listOf(f, f.copy(f.config ?: Bitmap.Config.ARGB_8888, false)), 500)
+            }
+            else -> null
+        } ?: return null
+        try {
+            return AnimatedWebp.encodeToFit(frames)
+        } finally {
+            frames.recycle()
+        }
+    }
+
     @Suppress("DEPRECATION")
     private fun compressWebp(bmp: Bitmap, quality: Int): ByteArray {
         val fmt = if (Build.VERSION.SDK_INT >= 30) Bitmap.CompressFormat.WEBP_LOSSY else Bitmap.CompressFormat.WEBP
@@ -176,6 +200,7 @@ class StickerRepository(private val context: Context) {
         val tray = fileOf(id, TRAY)
         if (stickers.length() == 0) { tray.delete(); return }
         val first = fileOf(id, stickers.getJSONObject(0).getString("image_file"))
+        // For an animated WebP, BitmapFactory gives the first frame (Android 9+). If it fails, keep the old tray.
         val src = BitmapFactory.decodeFile(first.path) ?: return
         val small = Bitmap.createScaledBitmap(src, 96, 96, true)
         tray.outputStream().use { small.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -195,6 +220,7 @@ class StickerRepository(private val context: Context) {
             publisher = p.optString("publisher", ""),
             trayFile = p.optString("tray_image_file", TRAY),
             stickers = list,
+            animated = p.optBoolean("animated_sticker_pack", false),
         )
     }
 

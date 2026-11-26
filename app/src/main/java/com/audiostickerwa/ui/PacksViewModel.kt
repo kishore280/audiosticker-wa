@@ -39,8 +39,8 @@ class PacksViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(packs = packs, added = added) }
     }
 
-    fun createPack(name: String, publisher: String, onCreated: (String) -> Unit) = viewModelScope.launch {
-        val id = repo.createPack(name.ifBlank { "My stickers" }, publisher.ifBlank { "Me" })
+    fun createPack(name: String, publisher: String, animated: Boolean, onCreated: (String) -> Unit) = viewModelScope.launch {
+        val id = repo.createPack(name.ifBlank { "My stickers" }, publisher.ifBlank { "Me" }, animated)
         refresh().join()
         onCreated(id)
     }
@@ -52,7 +52,7 @@ class PacksViewModel(app: Application) : AndroidViewModel(app) {
 
     fun addImages(id: String, uris: List<Uri>) = viewModelScope.launch {
         if (uris.isEmpty()) return@launch
-        _state.update { it.copy(busy = true) }
+        _state.update { it.copy(busy = true, message = "Converting ${uris.size} file(s)…") }
         val r = repo.addImages(id, uris)
         val msg = buildString {
             append("Added ${r.added} sticker(s)")

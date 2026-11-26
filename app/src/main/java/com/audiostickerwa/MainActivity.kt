@@ -93,7 +93,11 @@ private fun App(vm: PacksViewModel = viewModel()) {
                 stickerFile = { vm.fileOf(id, it) },
                 snackbar = snackbar,
                 onBack = { screen = "list" },
-                onAddImages = { picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                onAddImages = {
+                    val type = if (pack.animated) ActivityResultContracts.PickVisualMedia.ImageAndVideo
+                    else ActivityResultContracts.PickVisualMedia.ImageOnly
+                    picker.launch(PickVisualMediaRequest(type))
+                },
                 onRemoveSticker = { vm.removeSticker(id, it) },
                 onAddToWhatsApp = {
                     if (!WhatsApp.isInstalled(context, WhatsApp.CONSUMER) && !WhatsApp.isInstalled(context, WhatsApp.BUSINESS)) {
@@ -116,7 +120,7 @@ private fun App(vm: PacksViewModel = viewModel()) {
             trayFile = { vm.fileOf(it.id, it.trayFile) },
             snackbar = snackbar,
             onOpenPack = { screen = "pack:$it" },
-            onCreatePack = { n, p -> vm.createPack(n, p) { id -> screen = "pack:$id" } },
+            onCreatePack = { n, p, a -> vm.createPack(n, p, a) { id -> screen = "pack:$id" } },
             onOpenAudioStudio = { screen = "audio" },
         )
     }

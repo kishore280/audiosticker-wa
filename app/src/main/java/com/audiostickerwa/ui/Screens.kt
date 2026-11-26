@@ -30,6 +30,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -57,7 +58,7 @@ fun PackListContent(
     trayFile: (StickerPack) -> File,
     snackbar: SnackbarHostState,
     onOpenPack: (String) -> Unit,
-    onCreatePack: (name: String, publisher: String) -> Unit,
+    onCreatePack: (name: String, publisher: String, animated: Boolean) -> Unit,
     onOpenAudioStudio: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -92,7 +93,7 @@ fun PackListContent(
     if (showCreate) {
         CreatePackDialog(
             onDismiss = { showCreate = false },
-            onCreate = { n, pub -> showCreate = false; onCreatePack(n, pub) },
+            onCreate = { n, pub, a -> showCreate = false; onCreatePack(n, pub, a) },
         )
     }
 }
@@ -105,7 +106,7 @@ private fun PackRow(pack: StickerPack, isAdded: Boolean, tray: File, onClick: ()
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(pack.name, style = MaterialTheme.typography.titleSmall)
-                Text("${pack.publisher} · ${pack.stickers.size} stickers", style = MaterialTheme.typography.bodySmall)
+                Text("${pack.publisher} · ${pack.stickers.size} stickers" + if (pack.animated) " · animated" else "", style = MaterialTheme.typography.bodySmall)
             }
             if (isAdded) Text("Added", color = MaterialTheme.colorScheme.primary)
         }
@@ -113,8 +114,9 @@ private fun PackRow(pack: StickerPack, isAdded: Boolean, tray: File, onClick: ()
 }
 
 @Composable
-private fun CreatePackDialog(onDismiss: () -> Unit, onCreate: (String, String) -> Unit) {
+private fun CreatePackDialog(onDismiss: () -> Unit, onCreate: (String, String, Boolean) -> Unit) {
     var name by rememberSaveable { mutableStateOf("") }
+    var animated by rememberSaveable { mutableStateOf(true) }
     var publisher by rememberSaveable { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -123,9 +125,19 @@ private fun CreatePackDialog(onDismiss: () -> Unit, onCreate: (String, String) -
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(name, { name = it.take(128) }, label = { Text("Pack name") }, singleLine = true)
                 OutlinedTextField(publisher, { publisher = it.take(128) }, label = { Text("Publisher") }, singleLine = true)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Animated pack")
+                        Text(
+                            if (animated) "Video and GIF become moving stickers." else "Still images only.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    Switch(checked = animated, onCheckedChange = { animated = it })
+                }
             }
         },
-        confirmButton = { TextButton(onClick = { onCreate(name.trim(), publisher.trim()) }) { Text("Create") } },
+        confirmButton = { TextButton(onClick = { onCreate(name.trim(), publisher.trim(), animated) }) { Text("Create") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
@@ -160,13 +172,14 @@ fun PackDetailContent(
         Column(Modifier.padding(pad).fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(
                 "${pack.stickers.size} / ${StickerPack.MAX_STICKERS} stickers. WhatsApp needs ${StickerPack.MIN_STICKERS} or more. " +
-                    "Images become 512×512 WebP (< 100 KB). Tap a sticker to remove it.",
+                    (if (pack.animated) "Videos and GIFs become animated 512×512 WebP (< 500 KB, first 8 s). "
+                    else "Images become 512×512 WebP (< 100 KB). ") + "Tap a sticker to remove it.",
                 style = MaterialTheme.typography.bodySmall,
             )
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onAddImages, enabled = !busy && pack.stickers.size < StickerPack.MAX_STICKERS) {
-                    Text("Add images")
+                    Text(if (pack.animated) "Add video / GIF" else "Add images")
                 }
                 FilledTonalButton(onClick = onAddToWhatsApp, enabled = !busy && pack.canAddToWhatsApp && !isAdded) {
                     Text(if (isAdded) "Added to WhatsApp" else "Add to WhatsApp")
@@ -179,7 +192,7 @@ fun PackDetailContent(
             ) {
                 items(pack.stickers, key = { it.file }) { s ->
                     var ask by remember { mutableStateOf(false) }
-                    StickerImage(
+                    AnimatedStickerImage(
                         stickerFile(s.file), "sticker",
                         Modifier.aspectRatio(1f).clip(RoundedCornerShape(8.dp)).background(Color(0x22888888))
                             .clickable { ask = true },
