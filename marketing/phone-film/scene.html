@@ -1,0 +1,167 @@
+<!doctype html><html><head><meta charset="utf-8">
+<!-- Sticker Studio, 30 s phone film (1080 x 1920). Every frame is seek(t): no timers, no CSS transitions.
+     The phone shows the real app: frames/<clip>/NNNNN.jpg from footage/<clip>.mp4 (render.mjs frames).
+     Times here and in audio/mix.py move together (cue list in mix.py). -->
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1080px;height:1920px;overflow:hidden;background:#0c1b16;font-family:Inter,sans-serif;color:#fff}
+.bg{position:absolute;inset:0;background:linear-gradient(170deg,#0f2a21 0%,#0b1813 60%,#0a1511 100%)}
+.blob{position:absolute;border-radius:50%}
+#b1{width:900px;height:900px;left:-380px;top:980px;background:#1ed9a01c}
+#b2{width:760px;height:760px;left:640px;top:-260px;background:#7ee0ff14}
+.head{position:absolute;left:60px;right:60px;top:150px;text-align:center;font:800 92px/1.04 "Inter Display",Inter;letter-spacing:-2.5px}
+.head em{font-style:normal;position:relative;display:inline-block;color:#fff}
+.head em i{position:absolute;left:-4px;right:-4px;bottom:4px;height:16px;border-radius:8px;background:#25d366;z-index:-1;transform-origin:left center}
+.head em span{position:relative;z-index:1}
+#hook{top:560px}
+#phone{position:absolute;left:240px;top:470px;width:600px;height:1300px;border-radius:66px;background:#050807;padding:14px;box-shadow:0 50px 120px #0009,0 0 0 2px #2b3532 inset;transform-origin:50% 50%}
+#screen{position:absolute;inset:14px;border-radius:54px;overflow:hidden;background:#0f1513}
+#screen img{width:100%;height:100%;object-fit:cover;display:block}
+#icon{position:absolute;left:430px;top:900px;width:220px;height:220px;border-radius:52px;overflow:hidden;box-shadow:0 30px 80px #0008}
+.chip{position:absolute;display:flex;align-items:center;gap:14px;background:#f4fbf7;color:#0c2a21;border-radius:40px;padding:18px 28px;font:700 34px Inter;box-shadow:0 14px 40px #0006;white-space:nowrap}
+.chip b{font-size:36px}
+#card{position:absolute;left:600px;top:1120px;width:420px;background:#1f2c33;border-radius:30px;padding:22px;box-shadow:0 30px 80px #000a}
+#card .hd{display:flex;align-items:center;gap:14px;font:700 28px Inter;margin-bottom:16px}
+#card .av{width:52px;height:52px;border-radius:50%;background:#ffcf3a;display:flex;align-items:center;justify-content:center;font-size:28px}
+#card .stk{position:relative;width:260px;height:260px;margin-left:auto;border-radius:18px;overflow:hidden}
+#card .stk img{width:100%;height:100%;object-fit:cover}
+#card .snd{position:absolute;right:-6px;bottom:-6px;width:64px;height:64px;border-radius:50%;background:#00a884;display:flex;align-items:center;justify-content:center;font-size:32px}
+.ring{position:absolute;border:5px solid #3ee6a8;border-radius:50%}
+#end{position:absolute;left:0;right:0;top:880px;text-align:center}
+#word{font:800 110px "Inter Display",Inter;letter-spacing:-3px}
+#tag{font:600 48px Inter;color:#9fe8cf;margin-top:14px}
+#cta{display:inline-block;margin-top:60px;padding:28px 54px;border-radius:60px;background:#25d366;color:#04281c;font:800 46px Inter}
+#plat{margin-top:40px;font:700 26px Inter;letter-spacing:8px;color:#8fb3a6}
+#url{margin-top:16px;font:500 28px Inter;color:#b9cdc6}
+</style></head><body>
+<div class="bg"></div><div class="blob" id="b1"></div><div class="blob" id="b2"></div>
+<div class="head" id="hook">Stickers that<br><em><i></i><span>talk.</span></em></div>
+<div class="head" id="h1"></div>
+<div id="phone"><div id="screen"><img id="frame" alt=""></div></div>
+<div id="icon"></div>
+<div id="card"><div class="hd"><div class="av">🏖️</div>Beach crew</div>
+  <div class="stk"><img id="cardImg" src="../../docs/demo/sunny.png" alt=""><div class="snd">🔊</div></div></div>
+<div id="rings"></div>
+<div id="chips"></div>
+<div id="end"><div id="word">Sticker Studio</div><div id="tag">Stickers with sound.</div>
+  <div id="cta">Free on GitHub</div><div id="plat">ANDROID · OPEN SOURCE</div><div id="url">github.com/kishore280/audiosticker-wa</div></div>
+<script>
+window.DURATION = 30;
+// ---------- the real app footage: [t0, t1, clip, from (s in the footage), speed] ----------
+window.CLIPS = [
+  // filled from the emulator recording (see README in this folder)
+];
+// ---------- headlines: [start, end, html] (<em> = the highlighted word) ----------
+const CAPS = [
+  [2.4, 6.0, 'Any video.<br><em>Any app.</em>'],
+  [6.0, 11.0, 'Drag. Trim.<br><em>Done.</em>'],
+  [11.0, 15.0, 'Made on<br><em>your phone.</em>'],
+  [15.0, 19.0, 'Tap it.<br>It <em>plays.</em>'],
+  [19.0, 23.0, 'Sticker<br><em>packs</em> too.'],
+];
+const CHIPS = [
+  ['🎬', '4K & HDR video', 60, 520], ['✂️', 'Fit or Fill', 640, 600], ['📚', 'Your library', 40, 900],
+  ['🗂️', 'Animated packs', 600, 1010], ['🔒', 'No ads, no account', 70, 1300], ['💚', 'Open source', 640, 1420],
+];
+// ---------- easing ----------
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const prog = (t, a, d) => clamp((t - a) / d);
+const easeOut = (x) => 1 - Math.pow(1 - x, 3);
+const easeIn = (x) => x * x * x;
+const spring = (x) => (x >= 1 ? 1 : 1 - Math.exp(-6 * x) * Math.cos(9 * x));
+const lerp = (a, b, x) => a + (b - a) * x;
+// in (0.4 s ease-out) and out (65 %: 0.26 s ease-in) for a window [a, b]
+const vis = (t, a, b, din = 0.4) => (t < a || t > b ? 0 : Math.min(easeOut(prog(t, a, din)), 1 - easeIn(prog(t, b - din * 0.65, din * 0.65))));
+
+const $ = (id) => document.getElementById(id);
+const capEl = $('h1');
+const chipEls = CHIPS.map(([e, txt, x, y]) => {
+  const d = document.createElement('div'); d.className = 'chip'; d.innerHTML = `<b>${e}</b>${txt}`;
+  d.style.left = x + 'px'; d.style.top = y + 'px'; $('chips').appendChild(d); return d;
+});
+const ringEls = [0, 1, 2].map(() => { const r = document.createElement('div'); r.className = 'ring'; $('rings').appendChild(r); return r; });
+const RING = { x: 540, y: 980, size: 260 };   // sticker position on screen during 15-19 s (set from the footage)
+
+let lastSrc = '';
+async function setFrame(t) {
+  const c = CLIPS.find(([a, b]) => t >= a && t < b) || CLIPS[CLIPS.length - 1];
+  if (!c) return;
+  const [a, , clip, from, speed = 1] = c;
+  const n = Math.max(1, Math.floor((from + (t - a) * speed) * 60) + 1);
+  const src = `frames/${clip}/${String(n).padStart(5, '0')}.jpg`;
+  if (src === lastSrc) return;
+  lastSrc = src;
+  const img = $('frame'); img.src = src;
+  try { await img.decode(); } catch (e) { /* missing frame: keep the last one */ }
+}
+
+window.seek = async (t) => {
+  // hook: words, then the icon grows into the phone (one shape carries across)
+  const hk = vis(t, 0.15, 2.45, 0.45);
+  $('hook').style.opacity = hk;
+  $('hook').style.transform = `translateY(${(1 - easeOut(prog(t, 0.15, 0.45))) * 40}px)`;
+  $('hook').querySelector('i').style.transform = `scaleX(${easeOut(prog(t, 0.7, 0.4))})`;
+  const iconIn = spring(prog(t, 0.35, 0.6));
+  const grow = easeOut(prog(t, 2.1, 0.5));                    // icon -> phone (2.1 - 2.6)
+  const shrink = easeOut(prog(t, 26.0, 0.6));                 // phone -> icon (26.0 - 26.6)
+  const iconScale = t < 26 ? iconIn * (1 + grow * 1.6) : lerp(2.6, 1, shrink);
+  $('icon').style.transform = `scale(${iconScale})`;
+  $('icon').style.opacity = t < 26 ? (1 - prog(t, 2.25, 0.3)) * (t > 0.3 ? 1 : 0) : prog(t, 26.0, 0.25);
+  $('icon').style.top = (t < 26 ? 900 : lerp(900, 640, easeOut(prog(t, 26.2, 0.6)))) + 'px';
+
+  // phone: scale in from the icon, a smaller phone for the chips, back into the icon at the end
+  let ps = 0, pop = 0, py = 0;
+  if (t >= 2.2 && t < 26.3) {
+    ps = lerp(0.37, 1, easeOut(prog(t, 2.2, 0.5)));
+    pop = prog(t, 2.2, 0.15);
+    const chipK = easeOut(prog(t, 23.0, 0.45));
+    ps *= lerp(1, 0.8, chipK); py = lerp(0, 120, chipK);
+    if (t >= 26.0) { ps *= lerp(1, 0.3, easeIn(prog(t, 26.0, 0.3))); pop = 1 - prog(t, 26.0, 0.3); }
+  }
+  $('phone').style.opacity = pop;
+  $('phone').style.transform = `translateY(${py}px) scale(${ps})`;
+
+  // headline of the moment
+  const cap = CAPS.find(([a, b]) => t >= a && t < b);
+  if (cap) {
+    if (capEl.dataset.k !== String(cap[0])) { capEl.innerHTML = cap[2]; capEl.dataset.k = cap[0]; }
+    capEl.style.opacity = vis(t, cap[0], cap[1]);
+    capEl.style.transform = `translateY(${(1 - easeOut(prog(t, cap[0], 0.4))) * 30}px)`;
+    const u = capEl.querySelector('i'); if (u) u.style.transform = `scaleX(${easeOut(prog(t, cap[0] + 0.35, 0.4))})`;
+  } else capEl.style.opacity = 0;
+
+  // "it plays": rings on the sticker and the chat card
+  const rk = t >= 15.4 && t < 18.8;
+  ringEls.forEach((r, i) => {
+    const p = rk ? ((t - 15.4 - i * 0.35) % 1.05) / 1.05 : -1;
+    const on = rk && t - 15.4 - i * 0.35 >= 0;
+    r.style.opacity = on ? (1 - p) * 0.9 : 0;
+    const s = RING.size * (0.7 + p * 0.8);
+    r.style.width = r.style.height = s + 'px'; r.style.left = RING.x - s / 2 + 'px'; r.style.top = RING.y - s / 2 + 'px';
+  });
+  const cardIn = spring(prog(t, 16.2, 0.55));
+  $('card').style.opacity = vis(t, 16.2, 19.0, 0.3);
+  $('card').style.transform = `translateX(${(1 - cardIn) * 260}px) rotate(${(1 - cardIn) * 6}deg)`;
+
+  // chips around the smaller phone (23 - 26 s), 120 ms apart
+  chipEls.forEach((c, i) => {
+    const a = 23.3 + i * 0.12, k = spring(prog(t, a, 0.45));
+    c.style.opacity = vis(t, a, 26.0, 0.3);
+    c.style.transform = `scale(${0.6 + 0.4 * k})`;
+  });
+
+  // end card
+  const e = (a) => vis(t, a, 31, 0.45);
+  $('word').style.opacity = e(26.5); $('word').style.transform = `translateY(${(1 - easeOut(prog(t, 26.5, 0.45))) * 30}px)`;
+  $('tag').style.opacity = e(26.8); $('cta').style.opacity = e(27.2);
+  $('cta').style.transform = `scale(${0.85 + 0.15 * spring(prog(t, 27.2, 0.5))})`;
+  $('plat').style.opacity = e(27.6); $('url').style.opacity = e(27.8);
+  $('end').style.display = t >= 26.4 ? 'block' : 'none';
+
+  await setFrame(t);
+};
+
+window.ready = fetch('icon.svg').then((r) => r.text()).then((s) => {
+  $('icon').innerHTML = s.replace(/width="512" height="512"/, 'width="100%" height="100%"');
+});
+</script></body></html>
