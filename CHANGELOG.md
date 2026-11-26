@@ -2,6 +2,15 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## [1.0.2] - 2026-11-26
+
+### Fixed
+- Sticker Studio did not show in the share list when an app shares media as a generic file
+  ("application/octet-stream"), as many messaging and file apps do.
+- The app now finds the real type of a file from its name or its first bytes (MP4/MOV, WebM/MKV,
+  GIF, PNG, JPEG, WebP, HEIC, MP3, M4A, Ogg/Opus, WAV, FLAC, AMR), for shared and picked files.
+- A file that is not a video, GIF, image or sound shows a clear message.
+
 ## [1.0.1] - 2026-11-26
 
 ### Changed

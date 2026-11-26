@@ -81,7 +81,7 @@ fun AudioMakerScreen(
     // GIF and audio come from the document picker; the result goes to the picture or the sound by its type.
     val pickFile = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        val mime = context.contentResolver.getType(uri) ?: ""
+        val mime = com.kish.wastickers.sticker.MimeSniffer.mime(context, uri)
         if (mime.startsWith("audio/") || mime == "application/ogg") maker.setAudio(uri) else maker.setVisual(uri)
     }
     val result = maker.result

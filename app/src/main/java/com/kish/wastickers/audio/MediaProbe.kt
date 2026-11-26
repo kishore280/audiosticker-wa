@@ -12,7 +12,7 @@ import kotlinx.coroutines.withContext
 /** Reads the kind, length, shown size and name of a picked file (IO dispatcher). */
 object MediaProbe {
     suspend fun visual(ctx: Context, uri: Uri): Pair<VisualKind, Media> = withContext(Dispatchers.IO) {
-        val mime = ctx.contentResolver.getType(uri) ?: "application/octet-stream"
+        val mime = com.kish.wastickers.sticker.MimeSniffer.mime(ctx, uri)
         val kind = when {
             mime.startsWith("video/") -> VisualKind.Video
             mime == "image/gif" -> VisualKind.Gif
@@ -27,7 +27,7 @@ object MediaProbe {
     }
 
     suspend fun audio(ctx: Context, uri: Uri): Media = withContext(Dispatchers.IO) {
-        Media(uri, ctx.contentResolver.getType(uri) ?: "audio/mpeg", duration(ctx, uri), name(ctx, uri))
+        Media(uri, com.kish.wastickers.sticker.MimeSniffer.mime(ctx, uri), duration(ctx, uri), name(ctx, uri))
     }
 
     private fun duration(ctx: Context, uri: Uri): Long {

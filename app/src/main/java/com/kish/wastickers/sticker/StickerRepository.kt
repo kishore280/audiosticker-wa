@@ -214,7 +214,7 @@ class StickerRepository(private val context: Context) {
     private fun toAnimatedWebp(
         uri: Uri, startMs: Long = 0, durMs: Long = AnimatedWebp.MAX_DURATION_MS, framing: Framing = Framing(),
     ): ByteArray? {
-        val mime = context.contentResolver.getType(uri) ?: ""
+        val mime = MimeSniffer.mime(context, uri)
         val frames = when {
             mime.startsWith("video/") -> AnimatedWebp.fromVideo(context, uri, startMs, durMs, framing)
             mime == "image/gif" -> AnimatedWebp.fromGif(context, uri, framing)

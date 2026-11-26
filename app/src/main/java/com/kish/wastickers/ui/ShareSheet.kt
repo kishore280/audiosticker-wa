@@ -24,7 +24,7 @@ import androidx.compose.ui.unit.dp
 import com.kish.wastickers.sticker.StickerPack
 
 /** What was shared to the app. */
-enum class SharedKind { Video, Gif, Image, Audio }
+enum class SharedKind { Video, Gif, Image, Audio, Unsupported }
 
 /** Where shared files go: an audio sticker, an existing pack, or a new pack. */
 sealed interface ShareTarget {
@@ -57,6 +57,7 @@ fun ShareTargetSheet(
                 SharedKind.Video -> "this video"; SharedKind.Gif -> "this GIF"
                 SharedKind.Image -> if (count > 1) "these $count images" else "this image"
                 SharedKind.Audio -> "this sound"
+                SharedKind.Unsupported -> "this file"
             }
             Text("Use $what for…", style = MaterialTheme.typography.titleLarge)
             if (count == 1) {

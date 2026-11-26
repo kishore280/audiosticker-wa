@@ -5,7 +5,7 @@ plugins {
 }
 
 // ---- Version: change only appVersion. versionCode is made from it (1.2.3 -> 10203).
-val appVersion = "1.0.1"
+val appVersion = "1.0.2"
 val appVersionCode = appVersion.split(".").map { it.toInt() }.let { (a, b, c) -> a * 10000 + b * 100 + c }
 
 android {

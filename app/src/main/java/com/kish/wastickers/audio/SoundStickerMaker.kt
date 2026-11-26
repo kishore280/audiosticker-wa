@@ -46,7 +46,7 @@ object SoundStickerMaker {
         val pcm = try {
             AudioPipeline.decodePcm(ctx, soundSrc, spec.startMs, spec.durMs)
         } catch (e: Exception) {
-            val type = ctx.contentResolver.getType(soundSrc) ?: "unknown format"
+            val type = com.kish.wastickers.sticker.MimeSniffer.mime(ctx, soundSrc)
             throw IllegalStateException("Cannot read the sound ($type): ${e.message ?: e.javaClass.simpleName}")
         }
         if (pcm.size < AudioPipeline.RATE / 4) error("The sound part is too short.")
@@ -69,7 +69,7 @@ object SoundStickerMaker {
             }
             VisualKind.Gif -> AnimatedWebp.fromGif(ctx, spec.visual.uri, spec.framing, MAX_FRAMES)
             VisualKind.Image -> stillFrames(ctx, spec.visual.uri, spec.framing)
-        } ?: error("Cannot read the picture (${ctx.contentResolver.getType(spec.visual.uri) ?: "unknown format"}).")
+        } ?: error("Cannot read the picture (${spec.visual.mime}).")
 
         progress("Encoding the sticker…")
         // A stable id per (pack name, publisher): WhatsApp groups the stickers of one pack.

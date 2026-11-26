@@ -41,6 +41,7 @@ import com.kish.wastickers.audio.AudioMakerScreen
 import com.kish.wastickers.audio.AudioMakerState
 import com.kish.wastickers.audio.StickerEngine
 import com.kish.wastickers.sticker.StickerPack
+import com.kish.wastickers.sticker.MimeSniffer
 import com.kish.wastickers.sticker.WhatsApp
 import com.kish.wastickers.ui.PackContent
 import com.kish.wastickers.ui.ClipEditorDialog
@@ -136,16 +137,22 @@ private fun App(sharedUris: List<Uri>, onSharedTaken: () -> Unit, vm: PacksViewM
     var newPackFor by remember { mutableStateOf<Pair<SharedKind, List<Uri>>?>(null) }
     val sharedKind = remember(sharedUris) {
         sharedUris.firstOrNull()?.let { u ->
-            val mime = context.contentResolver.getType(u) ?: ""
+            val mime = MimeSniffer.mime(context, u)
             when {
-                mime.startsWith("audio/") -> SharedKind.Audio
+                mime.startsWith("audio/") || mime == "application/ogg" -> SharedKind.Audio
                 mime.startsWith("video/") -> SharedKind.Video
                 mime == "image/gif" -> SharedKind.Gif
-                else -> SharedKind.Image
+                mime.startsWith("image/") -> SharedKind.Image
+                else -> SharedKind.Unsupported
             }
         }
     }
     LaunchedEffect(sharedKind, sharedUris) {
+        if (sharedKind == SharedKind.Unsupported) {
+            // Launched in the app scope: onSharedTaken() changes this effect's key and would cancel it.
+            appScope.launch { snackbar.showSnackbar("This file is not a video, GIF, image or sound.") }
+            onSharedTaken()
+        }
         if (sharedKind == SharedKind.Audio) {
             maker.reset()
             maker.selectTab(com.kish.wastickers.audio.VisualKind.Image)
@@ -159,7 +166,7 @@ private fun App(sharedUris: List<Uri>, onSharedTaken: () -> Unit, vm: PacksViewM
         else vm.addImages(packId, uris)
         screen = "pack:$packId"
     }
-    if (sharedKind != null && sharedKind != SharedKind.Audio) {
+    if (sharedKind != null && sharedKind != SharedKind.Audio && sharedKind != SharedKind.Unsupported) {
         val uris = sharedUris
         ShareTargetSheet(
             kind = sharedKind,
@@ -307,7 +314,7 @@ private fun PackScreens(
         ) { uris -> vm.addImages(id, uris) }
         val pickOne = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
             if (uri == null) return@rememberLauncherForActivityResult
-            val mime = context.contentResolver.getType(uri) ?: ""
+            val mime = MimeSniffer.mime(context, uri)
             if (mime.startsWith("video/") || mime == "image/gif") clipUri = uri else vm.addImages(id, listOf(uri))
         }
         val addLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
