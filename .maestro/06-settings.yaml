@@ -1,0 +1,23 @@
+# Home and Settings.
+appId: com.kish.wastickers
+---
+- back
+- extendedWaitUntil:
+    visible: "Sticker packs.*"
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 2500
+- tapOn:
+    text: "Settings"
+- extendedWaitUntil:
+    visible: "Sticker info"
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 2000
+- scroll
+- waitForAnimationToEnd:
+    timeout: 2500
+- takeScreenshot: demo-out/08-settings
+- back
+- waitForAnimationToEnd:
+    timeout: 2000

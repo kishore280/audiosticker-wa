@@ -1,0 +1,15 @@
+# An image was shared: add it to the pack.
+appId: com.kish.wastickers
+---
+- extendedWaitUntil:
+    visible: "Use this image for.*"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn: "Add to \"Beach vibes\""
+- extendedWaitUntil:
+    visible: "Added 1 sticker.*"
+    timeout: 120000
+- waitForAnimationToEnd:
+    timeout: 3500
+- takeScreenshot: demo-out/07-pack-full

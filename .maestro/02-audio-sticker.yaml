@@ -1,0 +1,57 @@
+# A video was shared to the app: make an audio sticker from it.
+appId: com.kish.wastickers
+---
+- extendedWaitUntil:
+    visible: "Use this video for.*"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 2500
+- tapOn: "A sticker that plays.*"
+- extendedWaitUntil:
+    visible: "Fill.*drag to move.*"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn: "Fill.*drag to move.*"
+- waitForAnimationToEnd:
+    timeout: 1500
+- takeScreenshot: demo-out/02-maker
+# Drag the picture inside the square
+- swipe:
+    start: "62%, 40%"
+    end: "38%, 40%"
+    duration: 1200
+- swipe:
+    start: "38%, 40%"
+    end: "52%, 40%"
+    duration: 900
+# Trim: move the start handle
+- scrollUntilVisible:
+    element: ".*Play part"
+    direction: DOWN
+- takeScreenshot: demo-out/02b-trim
+- tapOn: ".*Play part"
+- waitForAnimationToEnd:
+    timeout: 6000
+- scrollUntilVisible:
+    element: "Create sticker"
+    direction: DOWN
+- tapOn: "Create sticker"
+- extendedWaitUntil:
+    visible: ".*Sticker created"
+    timeout: 180000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: demo-out/03-result
+- scrollUntilVisible:
+    element: "Make another"
+    direction: DOWN
+- waitForAnimationToEnd:
+    timeout: 2500
+- back
+- extendedWaitUntil:
+    visible: "My audio stickers.*"
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: demo-out/04-home-library

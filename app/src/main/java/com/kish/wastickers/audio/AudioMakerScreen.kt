@@ -181,7 +181,8 @@ fun AudioMakerContent(
             Modifier.padding(pad).padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (!linked) LinkCard(engineState, link, onPair, onCancelPairing)
+            // The link card shows when there is a sticker to send, not before the user made anything.
+            if (!linked && ui.result != null) LinkCard(engineState, link, onPair, onCancelPairing)
 
             ui.result?.let { r ->
                 // ---- Done: the sticker is saved in the library.

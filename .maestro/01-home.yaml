@@ -1,0 +1,11 @@
+# Fresh start: home screen.
+appId: com.kish.wastickers
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible: "Make an audio sticker"
+    timeout: 40000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: demo-out/01-home

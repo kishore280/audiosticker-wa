@@ -1,0 +1,21 @@
+# Make an animated sticker pack.
+appId: com.kish.wastickers
+---
+- scrollUntilVisible:
+    element: "New pack"
+    direction: DOWN
+- tapOn: "New pack"
+- tapOn: "Pack name"
+- inputText: "Beach vibes"
+- tapOn: "Publisher"
+- inputText: "Kish"
+- hideKeyboard
+- waitForAnimationToEnd:
+    timeout: 1500
+- tapOn: "Create"
+- extendedWaitUntil:
+    visible: "Animated pack.*"
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 2500
+- takeScreenshot: demo-out/05-pack-empty

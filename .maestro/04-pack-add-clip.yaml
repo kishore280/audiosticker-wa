@@ -1,0 +1,28 @@
+# A video or GIF was shared: add it to the pack with the clip editor.
+appId: com.kish.wastickers
+---
+- extendedWaitUntil:
+    visible: "Use this .* for.*"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 2000
+- tapOn: "Add to \"Beach vibes\""
+- extendedWaitUntil:
+    visible: "Add to pack"
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 2500
+- tapOn: "Fill.*drag to move.*"
+- waitForAnimationToEnd:
+    timeout: 1500
+- swipe:
+    start: "60%, 32%"
+    end: "40%, 32%"
+    duration: 1000
+- takeScreenshot: demo-out/06-clip-editor
+- tapOn: "Add to pack"
+- extendedWaitUntil:
+    visible: "Sticker added"
+    timeout: 180000
+- waitForAnimationToEnd:
+    timeout: 3000
