@@ -33,7 +33,8 @@ object SoundStickerMaker {
     private const val MAX_OGG = 950_000
     private const val MAX_FRAMES = 90
 
-    fun make(ctx: Context, spec: SoundStickerSpec, progress: (String) -> Unit): MadeSticker {
+    /** Writes sticker.webp and sound.ogg into [outDir] and returns the sound length in seconds. */
+    fun make(ctx: Context, spec: SoundStickerSpec, outDir: File, progress: (String) -> Unit): Int {
         if (Build.VERSION.SDK_INT < 29) error("Sound stickers need Android 10 or newer (Opus encoder).")
         // 1. Sound
         progress("Reading the sound…")
@@ -72,12 +73,9 @@ object SoundStickerMaker {
             frames.recycle()
         } ?: error("The sticker is too big. Make the part shorter.")
 
-        val dir = File(ctx.cacheDir, "made").apply { mkdirs() }
-        val stamp = System.currentTimeMillis()
-        dir.listFiles()?.forEach { it.delete() }
-        val webpFile = File(dir, "sticker_$stamp.webp").apply { writeBytes(webp) }
-        val oggFile = File(dir, "sticker_$stamp.ogg").apply { writeBytes(ogg) }
-        return MadeSticker(webpFile, oggFile, webp.size, ogg.size, maxOf(1, Math.round(seconds).toInt()), stamp)
+        File(outDir, SoundLibrary.WEBP).writeBytes(webp)
+        File(outDir, SoundLibrary.OGG).writeBytes(ogg)
+        return maxOf(1, Math.round(seconds).toInt())
     }
 
     /** An image as a 2-frame animation (WhatsApp sound stickers are animated). */

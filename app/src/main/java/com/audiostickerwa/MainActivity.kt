@@ -39,7 +39,13 @@ import com.audiostickerwa.audio.StickerEngine
 import com.audiostickerwa.sticker.StickerPack
 import com.audiostickerwa.sticker.WhatsApp
 import com.audiostickerwa.ui.PackDetailContent
-import com.audiostickerwa.ui.PackListContent
+import com.audiostickerwa.ui.HomeContent
+import com.audiostickerwa.audio.EngineState
+import com.audiostickerwa.audio.SavedSound
+import com.audiostickerwa.audio.SendSheet
+import com.audiostickerwa.audio.SoundActions
+import com.audiostickerwa.audio.SoundLibrary
+import com.audiostickerwa.audio.SoundSheet
 import com.audiostickerwa.ui.PacksViewModel
 
 class MainActivity : ComponentActivity() {
@@ -55,37 +61,78 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** Screen keys: "list", "pack:<id>", "audio". */
+/** Screen keys: "home", "pack:<id>", "audio". */
 @Composable
 private fun App(vm: PacksViewModel = viewModel()) {
     val context = LocalContext.current
-    var screen by rememberSaveable { mutableStateOf("list") }
-    // The WhatsApp engine lives as long as the app UI, so it stays connected between screens.
-    val engine = remember { StickerEngine(context.applicationContext) }
-    // Create/send belong to the same owner as the engine, so leaving the audio screen does not cancel a send.
+    var screen by rememberSaveable { mutableStateOf("home") }
+    val snackbar = remember { SnackbarHostState() }
+
+    // App-level owners: the WhatsApp engine (stays connected between screens), the library of made
+    // stickers, and the shared actions. Their work runs in this composition's scope, so changing screens
+    // does not cancel a create or a send.
     val appScope = rememberCoroutineScope()
-    val maker = remember(engine) { AudioMakerState(context.applicationContext, engine, appScope) }
+    val engine = remember { StickerEngine(context.applicationContext) }
+    val library = remember { SoundLibrary(context.applicationContext) }
+    val actions = remember(engine, library) { SoundActions(context.applicationContext, engine, library, appScope) }
+    val maker = remember(library) { AudioMakerState(context.applicationContext, library, appScope) }
     DisposableEffect(engine) { onDispose { engine.close() } }
     LaunchedEffect(engine) { engine.start() }
+    LaunchedEffect(library) { library.cleanUnfinished(); library.refresh() }
 
-    Box(Modifier.fillMaxSize()) {
-        if (screen == "audio") {
-            AudioMakerScreen(
-                engine = engine,
-                maker = maker,
-                onBack = { screen = "list" },
-            )
-            BackHandler { screen = "list" }
-        } else {
-            PackScreens(vm, screen, onNavigate = { screen = it })
+    LaunchedEffect(actions.message) {
+        val m = actions.message ?: return@LaunchedEffect
+        snackbar.showSnackbar(m)
+        actions.messageShown()
+    }
+
+    val engineState by engine.state.collectAsStateWithLifecycle()
+    val sounds by library.items.collectAsStateWithLifecycle()
+    var openSound by remember { mutableStateOf<String?>(null) }
+    var sendFor by remember { mutableStateOf<SavedSound?>(null) }
+
+    when {
+        screen == "audio" -> {
+            AudioMakerScreen(engine, maker, actions, snackbar, onBack = { screen = "home" })
+            BackHandler { screen = "home" }
         }
+        else -> PackScreens(
+            vm, screen, onNavigate = { screen = it }, snackbar = snackbar,
+            sounds = sounds,
+            linkedPhone = (engineState as? EngineState.Linked)?.phone,
+            onNewAudioSticker = { maker.reset(); screen = "audio" },
+            onOpenSound = { openSound = it.id },
+        )
+    }
+
+    sounds.firstOrNull { it.id == openSound }?.let { item ->
+        SoundSheet(
+            item = item,
+            sending = actions.sendingId == item.id,
+            linked = engineState is EngineState.Linked,
+            onSend = { sendFor = item },
+            onExport = { actions.export(item) },
+            onDelete = { openSound = null; actions.delete(item) },
+            onDismiss = { openSound = null },
+        )
+    }
+    sendFor?.let { item ->
+        SendSheet(engine, onPick = { c -> sendFor = null; actions.send(item, c) }, onDismiss = { sendFor = null })
     }
 }
 
 @Composable
-private fun PackScreens(vm: PacksViewModel, screen: String, onNavigate: (String) -> Unit) {
+private fun PackScreens(
+    vm: PacksViewModel,
+    screen: String,
+    onNavigate: (String) -> Unit,
+    snackbar: SnackbarHostState,
+    sounds: List<SavedSound>,
+    linkedPhone: String?,
+    onNewAudioSticker: () -> Unit,
+    onOpenSound: (SavedSound) -> Unit,
+) {
     val state by vm.state.collectAsStateWithLifecycle()
-    val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
 
     LaunchedEffect(state.message) {
@@ -97,10 +144,10 @@ private fun PackScreens(vm: PacksViewModel, screen: String, onNavigate: (String)
     if (screen.startsWith("pack:")) {
         val id = screen.removePrefix("pack:")
         val pack = state.packs.firstOrNull { it.id == id }
-        BackHandler { onNavigate("list") }
+        BackHandler { onNavigate("home") }
         if (pack == null) {
             // Pack was deleted (or not loaded yet).
-            LaunchedEffect(state.packs) { if (state.packs.none { it.id == id }) onNavigate("list") }
+            LaunchedEffect(state.packs) { if (state.packs.none { it.id == id }) onNavigate("home") }
             return
         }
         val picker = rememberLauncherForActivityResult(
@@ -118,7 +165,7 @@ private fun PackScreens(vm: PacksViewModel, screen: String, onNavigate: (String)
             busy = state.busy,
             stickerFile = { vm.fileOf(id, it) },
             snackbar = snackbar,
-            onBack = { onNavigate("list") },
+            onBack = { onNavigate("home") },
             onAddImages = {
                 val type = if (pack.animated) ActivityResultContracts.PickVisualMedia.ImageAndVideo
                 else ActivityResultContracts.PickVisualMedia.ImageOnly
@@ -136,17 +183,20 @@ private fun PackScreens(vm: PacksViewModel, screen: String, onNavigate: (String)
                     }
                 }
             },
-            onDeletePack = { vm.deletePack(id); onNavigate("list") },
+            onDeletePack = { vm.deletePack(id); onNavigate("home") },
         )
     } else {
-        PackListContent(
+        HomeContent(
+            sounds = sounds,
             packs = state.packs,
             added = state.added,
             trayFile = { vm.fileOf(it.id, it.trayFile) },
+            linkedPhone = linkedPhone,
             snackbar = snackbar,
+            onNewAudioSticker = onNewAudioSticker,
+            onOpenSound = onOpenSound,
             onOpenPack = { onNavigate("pack:$it") },
             onCreatePack = { n, p, a -> vm.createPack(n, p, a) { id -> onNavigate("pack:$id") } },
-            onOpenAudioStudio = { onNavigate("audio") },
         )
     }
 }

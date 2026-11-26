@@ -107,13 +107,38 @@ class StickerEngine(context: Context) {
     }
 
     /** Sends a made sound sticker. Returns the message ID. */
-    suspend fun send(chatId: String, s: MadeSticker): String {
+    suspend fun send(chat: WaChat, s: SavedSound): String {
         EngineService.start(appContext, "Sending sticker…", 120_000L)
         try {
-            return io { it.sendSoundSticker(chatId, s.webp.path, s.ogg.path, s.seconds.toLong(), true, "🔊") }
+            val id = io { it.sendSoundSticker(chat.id, s.webp.path, s.ogg.path, s.seconds.toLong(), true, "🔊") }
+            rememberChat(chat)
+            return id
         } finally {
             EngineService.stop(appContext)
         }
+    }
+
+    // ---------------------------------------------------------------- recent chats (for one-tap send)
+
+    private val prefs = context.getSharedPreferences("engine", Context.MODE_PRIVATE)
+    private val _recent = MutableStateFlow(loadRecent())
+    /** Chats the user sent to, newest first (max 6). */
+    val recentChats: StateFlow<List<WaChat>> = _recent.asStateFlow()
+
+    private fun loadRecent(): List<WaChat> = try {
+        val arr = JSONArray(prefs.getString("recent", "[]"))
+        (0 until arr.length()).map {
+            val o = arr.getJSONObject(it)
+            WaChat(o.getString("id"), o.getString("title"), o.optBoolean("group"))
+        }
+    } catch (e: Exception) { emptyList() }
+
+    private fun rememberChat(chat: WaChat) {
+        val list = (listOf(chat) + _recent.value.filter { it.id != chat.id }).take(6)
+        _recent.value = list
+        val arr = JSONArray()
+        list.forEach { arr.put(org.json.JSONObject().put("id", it.id).put("title", it.title).put("group", it.group)) }
+        prefs.edit().putString("recent", arr.toString()).apply()
     }
 
     fun close() { engine?.disconnect() }

@@ -17,7 +17,8 @@ import java.io.File
 
 enum class VisualKind { Video, Gif, Image }
 
-data class Media(val uri: Uri, val mime: String, val durationMs: Long, val name: String)
+/** A picked file. [width]/[height] are the shown size (rotation applied); 0 when unknown. */
+data class Media(val uri: Uri, val mime: String, val durationMs: Long, val name: String, val width: Int = 0, val height: Int = 0)
 
 /** What the audio maker screen renders. [visualKind] is null when no picture is selected. */
 data class AudioMakerUi(
@@ -33,12 +34,9 @@ data class AudioMakerUi(
     val canCreate: Boolean = false,
     val busy: Boolean = false,
     val error: String? = null,
-    val result: MadeSticker? = null,
-    val lastSent: String? = null,
-    val saved: String? = null,
+    val result: SavedSound? = null,
 )
 
-data class MadeSticker(val webp: File, val ogg: File, val webpBytes: Int, val oggBytes: Int, val seconds: Int, val stamp: Long)
 
 /**
  * Plain UI state holder for the audio sticker maker. It owns the user's choices and the last result.
@@ -49,13 +47,12 @@ data class MadeSticker(val webp: File, val ogg: File, val webpBytes: Int, val og
 @Stable
 class AudioMakerState(
     private val context: Context,
-    private val engine: StickerEngine,
+    private val library: SoundLibrary,
     private val scope: CoroutineScope,
 ) {
     var visual by mutableStateOf<Media?>(null); private set
     var visualKind by mutableStateOf(VisualKind.Video); private set
     var tab by mutableStateOf(VisualKind.Video); private set
-    var saved by mutableStateOf<String?>(null); private set
     /** Short text while busy (create/send steps). */
     var progress by mutableStateOf<String?>(null); private set
     var audio by mutableStateOf<Media?>(null); private set
@@ -64,14 +61,13 @@ class AudioMakerState(
     var crop by mutableStateOf(false); private set
     var busy by mutableStateOf(false); private set
     var error by mutableStateOf<String?>(null)
-    var result by mutableStateOf<MadeSticker?>(null); private set
-    var lastSent by mutableStateOf<String?>(null)
+    var result by mutableStateOf<SavedSound?>(null); private set
 
     /** Immutable snapshot for the stateless content composable. */
     fun ui() = AudioMakerUi(
         tab = tab, visual = visual, audio = audio,
         needsAudio = needsAudio, timedMs = timedDurationMs, range = range, crop = crop,
-        canCreate = canCreate, busy = busy, error = error, result = result, lastSent = lastSent, saved = saved,
+        canCreate = canCreate, busy = busy, error = error, result = result,
     )
 
     /** The source that the trim slider controls. */
@@ -85,26 +81,24 @@ class AudioMakerState(
     fun selectTab(kind: VisualKind) {
         if (kind == tab) return
         tab = kind
-        if (visual != null && visualKind != kind) { visual = null; result = null; lastSent = null; resetRange() }
+        if (visual != null && visualKind != kind) { visual = null; result = null; resetRange() }
     }
 
     /** A new trim or crop makes the old sticker out of date. */
     fun changeRange(r: ClosedFloatingPointRange<Float>) { if (r != range) { range = r; clearResult() } }
     fun changeCrop(c: Boolean) { if (c != crop) { crop = c; clearResult() } }
-    private fun clearResult() { if (!busy) { result = null; lastSent = null; saved = null } }
+    private fun clearResult() { if (!busy) result = null }
+
+    /** Starts again with an empty form (the made sticker stays in the library). */
+    fun reset() {
+        if (busy) return
+        visual = null; audio = null; result = null; error = null; crop = false
+        resetRange()
+    }
 
     fun setVisual(uri: Uri) { scope.launch { loadVisual(uri) } }
-    fun save() {
-        val r = result ?: return
-        scope.launch {
-            val a = saveToDownloads(context, r.webp, "sticker_${r.stamp}.webp", "image/webp")
-            saveToDownloads(context, r.ogg, "sticker_${r.stamp}.ogg", "audio/ogg")
-            saved = "Saved: ${a.substringBeforeLast('/')}/ (.webp + .ogg)"
-        }
-    }
     fun setAudio(uri: Uri?) { scope.launch { loadAudio(uri) } }
     fun create() { if (!busy) scope.launch { doCreate() } }
-    fun send(chat: WaChat) { if (!busy) scope.launch { doSend(chat) } }
 
     private suspend fun loadVisual(uri: Uri) {
         val mime = context.contentResolver.getType(uri) ?: "application/octet-stream"
@@ -113,17 +107,17 @@ class AudioMakerState(
             mime == "image/gif" -> VisualKind.Gif
             else -> VisualKind.Image
         }
-        val dur = withContext(Dispatchers.IO) {
+        val (dur, size) = withContext(Dispatchers.IO) {
             when (kind) {
-                VisualKind.Video -> mediaDuration(uri)
-                VisualKind.Gif -> gifDuration(uri)
-                VisualKind.Image -> 0L
+                VisualKind.Video -> mediaDuration(uri) to videoSize(uri)
+                VisualKind.Gif -> gifDuration(uri) to imageSize(uri)
+                VisualKind.Image -> 0L to imageSize(uri)
             }
         }
-        visual = Media(uri, mime, dur, displayName(uri))
+        visual = Media(uri, mime, dur, displayName(uri), size.first, size.second)
         visualKind = kind
         tab = kind
-        result = null; lastSent = null; saved = null
+        result = null
         resetRange()
     }
 
@@ -132,7 +126,7 @@ class AudioMakerState(
             val mime = context.contentResolver.getType(it) ?: "audio/mpeg"
             Media(it, mime, withContext(Dispatchers.IO) { mediaDuration(it) }, displayName(it))
         }
-        result = null; lastSent = null; saved = null
+        result = null
         resetRange()
     }
 
@@ -143,31 +137,19 @@ class AudioMakerState(
 
     private suspend fun doCreate() {
         val v = visual ?: return
-        busy = true; error = null; lastSent = null; saved = null
+        busy = true; error = null
+        val dir = library.newDir()
         try {
             val spec = SoundStickerSpec(
                 visual = v, kind = visualKind, audio = audio,
                 startMs = range.start.toLong(), durMs = (range.endInclusive - range.start).toLong(), crop = crop,
             )
-            result = withContext(Dispatchers.Default) {
-                SoundStickerMaker.make(context, spec) { p -> progress = p }
+            val seconds = withContext(Dispatchers.Default) {
+                SoundStickerMaker.make(context, spec, dir) { p -> progress = p }
             }
+            result = library.commit(dir, seconds)
         } catch (e: Exception) {
-            error = e.message ?: e.toString()
-        } finally {
-            busy = false
-            progress = null
-        }
-    }
-
-    private suspend fun doSend(chat: WaChat) {
-        val r = result ?: return
-        busy = true; error = null
-        progress = "Sending…"
-        try {
-            engine.send(chat.id, r)
-            lastSent = "Sent to ${chat.title} ✓  Open WhatsApp to forward it anywhere."
-        } catch (e: Exception) {
+            withContext(Dispatchers.IO) { dir.deleteRecursively() }
             error = e.message ?: e.toString()
         } finally {
             busy = false
@@ -182,6 +164,23 @@ class AudioMakerState(
             r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
         } catch (e: Exception) { 0L } finally { try { r.release() } catch (_: Exception) {} }
     }
+
+    private fun videoSize(uri: Uri): Pair<Int, Int> {
+        val r = MediaMetadataRetriever()
+        return try {
+            r.setDataSource(context, uri)
+            val w = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val h = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            val rot = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+            if (rot == 90 || rot == 270) h to w else w to h
+        } catch (e: Exception) { 0 to 0 } finally { try { r.release() } catch (_: Exception) {} }
+    }
+
+    private fun imageSize(uri: Uri): Pair<Int, Int> = try {
+        val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        context.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, o) }
+        o.outWidth.coerceAtLeast(0) to o.outHeight.coerceAtLeast(0)
+    } catch (e: Exception) { 0 to 0 }
 
     @Suppress("DEPRECATION")
     private fun gifDuration(uri: Uri): Long {

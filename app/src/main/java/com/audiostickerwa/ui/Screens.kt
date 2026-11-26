@@ -46,47 +46,94 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.audiostickerwa.sticker.StickerPack
+import com.audiostickerwa.audio.SavedSound
+import com.audiostickerwa.audio.SoundStickerTile
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material3.CardDefaults
 import java.io.File
 
 // Stateless, previewable content composables. They get state and callbacks only.
 
+/** Home: start an audio sticker, reuse saved ones, and manage sticker packs. Stateless; previewable with sample data. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PackListContent(
+fun HomeContent(
+    sounds: List<SavedSound>,
     packs: List<StickerPack>,
     added: Map<String, Boolean>,
     trayFile: (StickerPack) -> File,
+    linkedPhone: String?,
     snackbar: SnackbarHostState,
+    onNewAudioSticker: () -> Unit,
+    onOpenSound: (SavedSound) -> Unit,
     onOpenPack: (String) -> Unit,
     onCreatePack: (name: String, publisher: String, animated: Boolean) -> Unit,
-    onOpenAudioStudio: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var showCreate by rememberSaveable { mutableStateOf(false) }
-    Scaffold(
-        modifier = modifier,
-        topBar = { TopAppBar(title = { Text("Sticker packs") }) },
-        snackbarHost = { SnackbarHost(snackbar) },
-    ) { pad ->
-        Column(Modifier.padding(pad).fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Card(Modifier.fillMaxWidth().clickable(onClick = onOpenAudioStudio)) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("Audio sticker studio", style = MaterialTheme.typography.titleMedium)
+    Scaffold(modifier = modifier, snackbarHost = { SnackbarHost(snackbar) }) { pad ->
+        LazyColumn(
+            Modifier.padding(pad).fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item {
+                Column {
+                    Text("Sticker Studio", style = MaterialTheme.typography.headlineMedium)
                     Text(
-                        "Make stickers with sound from a video, GIF or image + audio, and send them to any chat.",
+                        if (linkedPhone != null) "WhatsApp linked (+$linkedPhone) ✓" else "WhatsApp not linked yet. You link it when you send the first audio sticker.",
                         style = MaterialTheme.typography.bodySmall,
+                        color = if (linkedPhone != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Your packs", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                Button(onClick = { showCreate = true }) { Text("New pack") }
-            }
-            if (packs.isEmpty()) Text("No packs yet. Push \"New pack\".")
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(packs, key = { it.id }) { p ->
-                    PackRow(p, added[p.id] == true, trayFile(p), onClick = { onOpenPack(p.id) })
+            item {
+                Card(
+                    Modifier.fillMaxWidth().clickable(onClick = onNewAudioSticker),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                ) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("🔊  Audio sticker", style = MaterialTheme.typography.titleLarge)
+                        Text(
+                            "A video, GIF or image with any sound. It plays the sound in WhatsApp when someone taps it.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Button(onClick = onNewAudioSticker) { Text("Make an audio sticker") }
+                    }
                 }
+            }
+
+            item { SectionHeader("My audio stickers", if (sounds.isEmpty()) null else "${sounds.size}") }
+            if (sounds.isEmpty()) {
+                item { EmptyNote("Audio stickers that you make show here. Tap one to hear it and send it again.") }
+            } else {
+                items(sounds.chunked(3), key = { row -> row.first().id }) { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { sound ->
+                            SoundStickerTile(sound, Modifier.weight(1f).aspectRatio(1f), onClick = { onOpenSound(sound) })
+                        }
+                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+            }
+
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) { SectionHeader("Sticker packs", if (packs.isEmpty()) null else "${packs.size}") }
+                    OutlinedButton(onClick = { showCreate = true }) { Text("New pack") }
+                }
+            }
+            if (packs.isEmpty()) {
+                item {
+                    EmptyNote(
+                        "A pack is a set of 3 to 30 stickers (no sound) that you add to the WhatsApp sticker tray. " +
+                            "Make one from images, or from videos and GIFs (animated).",
+                    )
+                }
+            }
+            items(packs, key = { it.id }) { p ->
+                PackRow(p, added[p.id] == true, trayFile(p), onClick = { onOpenPack(p.id) })
             }
         }
     }
@@ -95,6 +142,21 @@ fun PackListContent(
             onDismiss = { showCreate = false },
             onCreate = { n, pub, a -> showCreate = false; onCreatePack(n, pub, a) },
         )
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String, count: String?) {
+    Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(top = 8.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        count?.let { Text("  $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
+}
+
+@Composable
+private fun EmptyNote(text: String) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Text(text, Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

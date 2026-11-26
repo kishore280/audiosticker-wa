@@ -1,60 +1,45 @@
 package com.audiostickerwa.audio
 
-import android.media.MediaPlayer
+import android.Manifest
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
-import android.Manifest
-import android.os.Build
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AssistChip
-import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RangeSlider
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,26 +47,27 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.audiostickerwa.ui.AnimatedStickerImage
 import kotlinx.coroutines.launch
 
-/**
- * Wiring: connects the engine, the maker state holder and the system pickers to [AudioMakerContent].
- */
+/** Wiring: engine, maker state, shared sticker actions and system pickers -> [AudioMakerContent]. */
 @Composable
 fun AudioMakerScreen(
     engine: StickerEngine,
     maker: AudioMakerState,
+    actions: SoundActions,
+    snackbar: SnackbarHostState,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val engineState by engine.state.collectAsStateWithLifecycle()
-    // Link and chat-list work is a user-event coroutine of this screen.
+    val recent by engine.recentChats.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    var chatPicker by remember { mutableStateOf<List<WaChat>?>(null) }
+    var sendSheet by remember { mutableStateOf(false) }
     var linkBusy by remember { mutableStateOf(false) }
     var linkError by remember { mutableStateOf<String?>(null) }
     // The keep-alive notification during linking needs this permission on Android 13+ (linking works without it).
@@ -96,12 +82,16 @@ fun AudioMakerScreen(
         val mime = context.contentResolver.getType(uri) ?: ""
         if (mime.startsWith("audio/") || mime == "application/ogg") maker.setAudio(uri) else maker.setVisual(uri)
     }
+    val result = maker.result
 
     AudioMakerContent(
         ui = maker.ui(),
         engineState = engineState,
         progress = maker.progress,
         link = LinkUi(busy = linkBusy, error = linkError),
+        quickChats = (listOf(SelfChat) + recent.filter { it.id != SelfChat.id }).take(3),
+        sending = result != null && actions.sendingId == result.id,
+        snackbar = snackbar,
         onBack = onBack,
         onPair = { phone ->
             if (Build.VERSION.SDK_INT >= 33) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -111,8 +101,8 @@ fun AudioMakerScreen(
                 linkBusy = false
             }
         },
-        onLogout = { scope.launch { engine.logout() } },
         onCancelPairing = { scope.launch { engine.cancelPairing() } },
+        onLogout = { scope.launch { engine.logout() } },
         onTab = maker::selectTab,
         onPickVisual = {
             when (maker.tab) {
@@ -122,43 +112,37 @@ fun AudioMakerScreen(
             }
         },
         onPickAudio = { pickFile.launch("audio/*") },
-        onSave = maker::save,
         onRemoveAudio = { maker.setAudio(null) },
         onRangeChange = maker::changeRange,
         onCropChange = maker::changeCrop,
         onCreate = maker::create,
-        onSendClick = {
-            scope.launch {
-                chatPicker = try { engine.chats() } catch (e: Exception) { maker.error = e.message; null }
-            }
-        },
+        onQuickSend = { c -> result?.let { actions.send(it, c) } },
+        onMoreChats = { sendSheet = true },
+        onExport = { result?.let { actions.export(it) } },
+        onMakeAnother = maker::reset,
         modifier = modifier,
     )
 
-    chatPicker?.let { chats ->
-        ChatPickerDialog(
-            chats = chats,
-            onDismiss = { chatPicker = null },
-            onPick = { c -> chatPicker = null; maker.send(c) },
-        )
+    if (sendSheet && result != null) {
+        SendSheet(engine, onPick = { c -> sendSheet = false; actions.send(result, c) }, onDismiss = { sendSheet = false })
     }
 }
 
-/** Local state of the link card. */
-data class LinkUi(val busy: Boolean = false, val error: String? = null)
-
-/** Stateless, previewable content. Flow: tab → choose → (sound) → trim with preview → create → hear → send / save. */
-@OptIn(ExperimentalMaterial3Api::class)
+/** Stateless, previewable content. Flow: tab → choose → (sound) → square preview + trim → create → hear → send. */
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun AudioMakerContent(
     ui: AudioMakerUi,
     engineState: EngineState,
     progress: String?,
     link: LinkUi,
+    quickChats: List<WaChat>,
+    sending: Boolean,
+    snackbar: SnackbarHostState,
     onBack: () -> Unit,
     onPair: (String) -> Unit,
-    onLogout: () -> Unit,
     onCancelPairing: () -> Unit,
+    onLogout: () -> Unit,
     onTab: (VisualKind) -> Unit,
     onPickVisual: () -> Unit,
     onPickAudio: () -> Unit,
@@ -166,39 +150,46 @@ fun AudioMakerContent(
     onRangeChange: (ClosedFloatingPointRange<Float>) -> Unit,
     onCropChange: (Boolean) -> Unit,
     onCreate: () -> Unit,
-    onSendClick: () -> Unit,
-    onSave: () -> Unit,
+    onQuickSend: (WaChat) -> Unit,
+    onMoreChats: () -> Unit,
+    onExport: () -> Unit,
+    onMakeAnother: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val ready = engineState is EngineState.Linked
+    val linked = engineState is EngineState.Linked
     var playing by remember(ui.visual, ui.audio) { mutableStateOf(false) }
     var moreOptions by remember { mutableStateOf(false) }
     Scaffold(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text("Audio sticker") },
+                title = { Text("New audio sticker") },
                 navigationIcon = { TextButton(onClick = onBack) { Text("Back") } },
             )
         },
+        snackbarHost = { SnackbarHost(snackbar) },
     ) { pad ->
         Column(
             Modifier.padding(pad).padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (!ready) LinkCard(engineState, link, onPair, onCancelPairing)
+            if (!linked) LinkCard(engineState, link, onPair, onCancelPairing)
+
+            ui.result?.let { r ->
+                // ---- Done: the sticker is saved in the library.
+                ResultCard(r, quickChats, linked, sending, onQuickSend, onMoreChats, onExport, onMakeAnother)
+                return@Column
+            }
 
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 VisualKind.entries.forEachIndexed { i, k ->
                     SegmentedButton(
-                        selected = ui.tab == k,
-                        onClick = { onTab(k) },
+                        selected = ui.tab == k, onClick = { onTab(k) },
                         shape = SegmentedButtonDefaults.itemShape(i, VisualKind.entries.size),
                     ) { Text(k.label) }
                 }
             }
 
-            // ---- 1. Choose
             Step(1, "Choose ${ui.tab.article} ${ui.tab.label.lowercase()}")
             FileCard(
                 title = ui.visual?.name,
@@ -207,7 +198,6 @@ fun AudioMakerContent(
                 onClick = onPickVisual,
             )
 
-            // ---- Sound
             if (ui.visual != null) {
                 if (ui.tab == VisualKind.Video) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -227,15 +217,22 @@ fun AudioMakerContent(
                         onClick = onPickAudio,
                     )
                 }
-            }
 
-            // ---- Preview + trim
-            if (ui.visual != null) {
+                // ---- Square preview = the sticker, with live Fit / Fill.
                 ClipPreview(
-                    kind = ui.tab, visual = ui.visual.uri, audio = ui.audio?.uri, range = ui.range,
+                    kind = ui.tab, visual = ui.visual, audio = ui.audio, range = ui.range, crop = ui.crop,
                     playing = playing, onFinished = { playing = false },
                 )
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    SegmentedButton(selected = !ui.crop, onClick = { onCropChange(false) }, shape = SegmentedButtonDefaults.itemShape(0, 2)) {
+                        Text("Fit (whole picture)")
+                    }
+                    SegmentedButton(selected = ui.crop, onClick = { onCropChange(true) }, shape = SegmentedButtonDefaults.itemShape(1, 2)) {
+                        Text("Fill (square)")
+                    }
+                }
             }
+
             if (ui.timedMs > 0) {
                 RangeSlider(
                     value = ui.range,
@@ -247,7 +244,7 @@ fun AudioMakerContent(
                 )
                 val len = ui.range.endInclusive - ui.range.start
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    OutlinedButton(onClick = { playing = !playing }) { Text(if (playing) "■ Stop" else "▶ Play") }
+                    OutlinedButton(onClick = { playing = !playing }) { Text(if (playing) "■ Stop" else "▶ Play part") }
                     Spacer(Modifier.width(12.dp))
                     Text("${fmt(ui.range.start)} → ${fmt(ui.range.endInclusive)}", Modifier.weight(1f))
                     AssistChip(onClick = {}, label = { Text(fmt(len)) })
@@ -259,55 +256,60 @@ fun AudioMakerContent(
                 )
             }
 
-            // ---- 2/3. Create and send
             HorizontalDivider()
-            Step(if (ui.tab == VisualKind.Video) 2 else 3, "Create and send")
-            Button(onClick = onCreate, enabled = ui.canCreate && ui.result == null, modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    when {
-                        ui.busy && ui.result == null -> "Creating…"
-                        ui.result != null -> "✓ Sticker created"
-                        else -> "Create sticker"
-                    },
-                )
+            Button(onClick = onCreate, enabled = ui.canCreate, modifier = Modifier.fillMaxWidth()) {
+                Text(if (ui.busy) "Creating…" else "Create sticker")
             }
             if (ui.busy) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
                 Text(progress ?: "Working…", style = MaterialTheme.typography.bodySmall)
             }
             ui.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            ui.lastSent?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
 
-            ui.result?.let { r ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    TapToHearSticker(r, Modifier.size(140.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text("Tap the sticker to hear it.", style = MaterialTheme.typography.bodySmall)
-                        Text("${r.seconds} s · ${r.webpBytes / 1024} KB + ${r.oggBytes / 1024} KB sound",
-                            style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = onSendClick, enabled = !ui.busy && ready, modifier = Modifier.weight(1f)) { Text("Send") }
-                    OutlinedButton(onClick = onSave, enabled = !ui.busy) { Text("Save") }
-                }
-                ui.saved?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            }
-
-            // ---- More options
             TextButton(onClick = { moreOptions = !moreOptions }) { Text(if (moreOptions) "▾ More options" else "▸ More options") }
-            if (moreOptions) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("Crop to fill the square", Modifier.weight(1f))
-                    Switch(checked = ui.crop, onCheckedChange = onCropChange)
-                }
-                if (engineState is EngineState.Linked) {
-                    Text("Linked to +${engineState.phone}", style = MaterialTheme.typography.bodySmall)
-                    TextButton(onClick = onLogout) { Text("Unlink this app from WhatsApp") }
-                }
+            if (moreOptions && engineState is EngineState.Linked) {
+                Text("Linked to +${engineState.phone}", style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = onLogout) { Text("Unlink this app from WhatsApp") }
             }
             Spacer(Modifier.size(24.dp))
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ResultCard(
+    r: SavedSound,
+    quickChats: List<WaChat>,
+    linked: Boolean,
+    sending: Boolean,
+    onQuickSend: (WaChat) -> Unit,
+    onMoreChats: () -> Unit,
+    onExport: () -> Unit,
+    onMakeAnother: () -> Unit,
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text("✓ Sticker created", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+            SoundStickerTile(r, Modifier.size(200.dp))
+            Text(
+                "Tap it to hear it. ${r.seconds} s · ${(r.webpBytes + r.oggBytes) / 1024} KB. Saved in My audio stickers.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            if (sending) LinearProgressIndicator(Modifier.fillMaxWidth())
+            Text("Send to", style = MaterialTheme.typography.titleSmall, modifier = Modifier.fillMaxWidth())
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                quickChats.forEach { c ->
+                    FilledTonalButton(onClick = { onQuickSend(c) }, enabled = linked && !sending) {
+                        Text(if (c.id == "self") "Me" else c.title, maxLines = 1)
+                    }
+                }
+                OutlinedButton(onClick = onMoreChats, enabled = linked && !sending) { Text("Other chat…") }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onExport) { Text("Export") }
+                Button(onClick = onMakeAnother) { Text("Make another") }
+            }
         }
     }
 }
@@ -338,96 +340,6 @@ private fun FileCard(title: String?, subtitle: String?, emptyText: String, onCli
             Text(if (title == null) "Select" else "Change", color = MaterialTheme.colorScheme.primary)
         }
     }
-}
-
-/** The made sticker; a tap plays its sound. The MediaPlayer belongs to this composable. */
-@Composable
-private fun TapToHearSticker(r: MadeSticker, modifier: Modifier = Modifier) {
-    var player by remember(r.stamp) { mutableStateOf<MediaPlayer?>(null) }
-    DisposableEffect(r.stamp) { onDispose { player?.release(); player = null } }
-    AnimatedStickerImage(
-        r.webp, "sticker preview",
-        modifier.clip(RoundedCornerShape(12.dp)).background(Color(0x22888888)).clickable {
-            player?.release()
-            player = try { MediaPlayer().apply { setDataSource(r.ogg.path); prepare(); start() } } catch (e: Exception) { null }
-        },
-    )
-}
-
-@Composable
-private fun LinkCard(state: EngineState, link: LinkUi, onPair: (String) -> Unit, onCancel: () -> Unit) {
-    var phone by rememberSaveable { mutableStateOf("") }
-    val clipboard = LocalClipboardManager.current
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
-        Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            when (state) {
-                EngineState.Starting, EngineState.Connecting -> {
-                    Text("Connecting to WhatsApp…", style = MaterialTheme.typography.titleSmall)
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
-                }
-                is EngineState.Pairing -> {
-                    Text("Type this code in WhatsApp", style = MaterialTheme.typography.titleSmall)
-                    Text(state.code, style = MaterialTheme.typography.displaySmall, fontFamily = FontFamily.Monospace)
-                    Text(
-                        "1. Copy the code.  2. Open WhatsApp → Settings → Linked devices → Link a device → " +
-                            "Link with phone number instead.  3. Type the code.  4. Come back here: this card " +
-                            "changes to \"Linked\". The code expires after about 2 minutes.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { clipboard.setText(AnnotatedString(state.code.replace("-", ""))) }) { Text("Copy code") }
-                        OutlinedButton(onClick = onCancel) { Text("New code") }
-                    }
-                }
-                else -> {
-                    Text("Link WhatsApp (one time)", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        "To send audio stickers, this app becomes a linked device of your WhatsApp, like WhatsApp Web. " +
-                            "This is not an official WhatsApp API: use it by hand only, never for bulk messages. " +
-                            "Test with a second number first if you can.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    OutlinedTextField(
-                        phone, { phone = it.filter { c -> c.isDigit() || c == '+' } },
-                        label = { Text("Your number with country code, e.g. +91 98765 43210") },
-                        singleLine = true, modifier = Modifier.fillMaxWidth(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                    )
-                    Button(onClick = { onPair(phone) }, enabled = !link.busy && phone.count { it.isDigit() } >= 8) {
-                        Text(if (link.busy) "Getting code…" else "Get link code")
-                    }
-                    if (state is EngineState.Failed) Text(state.reason, color = MaterialTheme.colorScheme.error)
-                }
-            }
-            link.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        }
-    }
-}
-
-@Composable
-private fun ChatPickerDialog(chats: List<WaChat>, onDismiss: () -> Unit, onPick: (WaChat) -> Unit) {
-    var q by remember { mutableStateOf("") }
-    val me = WaChat("self", "Me (message yourself)", false)
-    val shown = listOf(me) + chats.filter { q.isBlank() || it.title.contains(q, ignoreCase = true) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Send to") },
-        text = {
-            Column {
-                OutlinedTextField(q, { q = it }, label = { Text("Search") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                LazyColumn(Modifier.heightIn(max = 360.dp)) {
-                    items(shown, key = { it.id }) { c ->
-                        Text(
-                            (if (c.group) "👥 " else "") + c.title,
-                            Modifier.fillMaxWidth().clickable { onPick(c) }.padding(vertical = 12.dp),
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
 }
 
 private fun fmt(ms: Float): String = "%.1f s".format(ms / 1000f)
