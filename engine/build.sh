@@ -6,6 +6,7 @@ cd "$(dirname "$0")"
 export GOTOOLCHAIN=auto
 export PATH="$PATH:$(go env GOPATH)/bin"
 command -v gomobile >/dev/null || go install golang.org/x/mobile/cmd/gomobile@latest
+command -v gobind >/dev/null || go install golang.org/x/mobile/cmd/gobind@latest
 go mod download
 # Patched copy of whatsmeow (see patch_whatsmeow.py).
 WM_DIR="$(go list -m -f '{{.Dir}}' go.mau.fi/whatsmeow)"
