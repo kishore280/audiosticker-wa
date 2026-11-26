@@ -4,7 +4,7 @@ An Android app that makes WhatsApp stickers:
 
 1. **Still sticker packs**: you select images. The app converts each one to a 512×512 WebP (less than 100 KB) and makes the 96×96 tray icon. You push **Add to WhatsApp**.
 2. **Animated sticker packs**: you select videos or GIFs. The app converts the first 8 s of each one to an animated WebP (less than 500 KB). You push **Add to WhatsApp**.
-3. **Audio stickers** (stickers with sound): you select a video, GIF or image, select a sound and trim it. The app makes the sticker and sends it to any chat. You can then forward it from the normal WhatsApp app.
+3. **Audio stickers** (stickers with sound): you select a video, GIF or image, select a sound and trim it. The app makes the sticker on the phone and sends it to any chat. Then you can forward it from the normal WhatsApp app.
 
 ## How it works
 
@@ -14,32 +14,38 @@ An Android app that makes WhatsApp stickers:
 - `sticker/AnimatedWebp.kt` extracts frames with `MediaMetadataRetriever` (video) or `Movie` (GIF), encodes each frame with `Bitmap.compress(WEBP)`, and puts the frames in one animated WebP with a small muxer. It uses no native libraries.
 - WhatsApp does not accept mixed packs. Thus you select "Animated pack" when you make a pack.
 
-### Audio stickers (3): a hidden WhatsApp Web session
-WhatsApp has **no public API** for sound stickers. The sticker-pack contract has no audio field. A sound sticker is an animated WebP (its EXIF carries `sound-sha256`) plus an Ogg/Opus file, linked in one `StickerMessage` (`audioMessage`). Only a WhatsApp client can send this message.
+### Audio stickers (3): own WhatsApp engine (whatsmeow), no browser
+WhatsApp has **no public API** for sound stickers, and the sticker-pack contract has no audio field. A sound sticker is one message:
 
-Thus the app keeps **WhatsApp Web in a hidden WebView** (`audio/WaEngine.kt`):
-- You link WhatsApp **one time**. Push **Link WhatsApp**, then **Link with phone number instead**, and type the code in WhatsApp → Settings → Linked devices.
-- After that, the native screen (`audio/AudioMakerScreen.kt`) sends the media to the engine through a same-origin local URL. The engine makes the sticker, and the app sends it to the chat that you select.
-- The engine is [KaraBala10/whatsapp-audio-stickers](https://github.com/KaraBala10/whatsapp-audio-stickers) (MIT). It is bundled without changes in `app/src/main/assets/engine/` (see `SOURCE.md` and `LICENSE` there). `app_api.js` is the app's small bridge to it.
+```
+Message.audioStickerMessage (134) → FutureProofMessage.message → Message.stickerMessage
+  { WebP media, isAnimated, premium = 0, emojis, audioMessage { Ogg/Opus media, ptt = false, seconds } }
+```
+The WebP's EXIF (TIFF tag `0x5741`) holds JSON with `"sound-sha256"` = base64 SHA-256 of the Ogg file.
 
-Steps to make the WebView work reliably:
-- Desktop Windows Chrome user agent with the real WebView version, and client hints that say desktop (`UserAgentMetadata`).
-- The app blocks the redirect to `www.whatsapp.com` that WhatsApp sends to phone browsers.
-- The scripts are injected with `addDocumentStartJavaScript`. `onPageFinished` injects them again as a fallback. WhatsApp's CSP blocks inline `<script>` tags, but not this method.
-- At startup, the app checks for WebCodecs Opus, canvas WebP, and ImageDecoder, and tells the user to update Android System WebView if one is missing.
-- JS calls have a timeout and fail when the page reloads, so the UI never waits forever.
+How the app makes and sends it:
+- **Engine:** `engine/` is a small Go package over [whatsmeow](https://github.com/tulir/whatsmeow) (MPL-2.0), the same library that [wacli](https://github.com/openclaw/wacli) uses. `engine/build.sh` builds it with gomobile into `app/libs/waengine.aar`, and Kotlin wraps it in `audio/StickerEngine.kt`. The app is a **linked device** of your WhatsApp. You link it one time with a phone code: WhatsApp shows a notification on the same phone, and you type the code there.
+- **whatsmeow patch:** whatsmeow does not unwrap `audioStickerMessage` when it sets the stanza type. `engine/patch_whatsmeow.py` adds the same unwrap that whatsmeow already does for `lottieStickerMessage`. `build.sh` applies it to a copy of the module.
+- **Sound:** `audio/AudioPipeline.kt` decodes the selected part to mono 48 kHz PCM with MediaCodec and encodes it to Opus with the MediaCodec Opus encoder (Android 10+). `audio/OggOpus.kt` writes the Ogg file.
+- **Picture:** `sticker/AnimatedWebp.kt` makes frames, encodes the animated WebP (less than 950 KB), and adds the EXIF block.
+- **Tests:** `OggOpusTest` and `AnimatedWebpTest`. With real Opus packets and WebP frames from Chromium, the Ogg file decodes to the exact length, and the animated WebP decodes to the correct frames with the EXIF block.
 
 **Risks:**
-- The engine uses internal WhatsApp Web modules, so a WhatsApp Web update can break sending. If this occurs, update the engine files from upstream.
-- This is not an official API. Send stickers by hand only, never in bulk.
-- A linked device is logged out if the phone stays offline for more than 14 days.
+- whatsmeow is a third-party client. WhatsApp can ban accounts that use third-party clients. Send stickers by hand only, never in bulk, and test with a second number first.
+- If WhatsApp changes the protocol, update whatsmeow (`go get go.mau.fi/whatsmeow@main` in `engine/`) and run `engine/build.sh` again.
 
 ## Build
 
-Requirements: JDK 17+ and the Android SDK (compileSdk 36).
+Requirements: JDK 17+ and the Android SDK (compileSdk 36). The engine AAR is already in `app/libs`.
 
 ```bash
 ./gradlew assembleDebug
+```
+
+To build the engine again (needs Go 1.26+, the Android NDK and python3):
+
+```bash
+engine/build.sh
 ```
 
 The APK is in `app/build/outputs/apk/debug/`. Change `applicationId` in `app/build.gradle.kts` before you publish the app. Do not use "WhatsApp" in the app name.

@@ -5,6 +5,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.CircleShape
@@ -61,23 +65,21 @@ import kotlinx.coroutines.launch
 
 /**
  * Wiring: connects the engine, the maker state holder and the system pickers to [AudioMakerContent].
- * WhatsApp Web runs hidden; it shows only when the user links the account.
  */
 @Composable
 fun AudioMakerScreen(
-    engine: WaEngine,
+    engine: StickerEngine,
     maker: AudioMakerState,
     onBack: () -> Unit,
-    onShowWhatsAppWeb: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val engineState by engine.state.collectAsStateWithLifecycle()
-    val progress by engine.progress.collectAsStateWithLifecycle()
-    val capsWarning by engine.capsWarning.collectAsStateWithLifecycle()
-    // The chat list dialog is local UI: loading it is a user-event coroutine of this screen.
+    // Link and chat-list work is a user-event coroutine of this screen.
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var chatPicker by remember { mutableStateOf<List<WaChat>?>(null) }
+    var linkBusy by remember { mutableStateOf(false) }
+    var linkError by remember { mutableStateOf<String?>(null) }
 
     val pickVisual = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) maker.setVisual(uri)
@@ -92,11 +94,17 @@ fun AudioMakerScreen(
     AudioMakerContent(
         ui = maker.ui(),
         engineState = engineState,
-        capsWarning = capsWarning?.ifEmpty { null },
-        progress = progress,
+        progress = maker.progress,
+        link = LinkUi(busy = linkBusy, error = linkError),
         onBack = onBack,
-        onLink = onShowWhatsAppWeb,
-        onRetry = engine::reload,
+        onPair = { phone ->
+            scope.launch {
+                linkBusy = true; linkError = null
+                try { engine.pair(phone) } catch (e: Exception) { linkError = e.message ?: e.toString() }
+                linkBusy = false
+            }
+        },
+        onLogout = { scope.launch { engine.logout() } },
         onTab = maker::selectTab,
         onPickVisual = {
             when (maker.tab) {
@@ -128,17 +136,20 @@ fun AudioMakerScreen(
     }
 }
 
+/** Local state of the link card. */
+data class LinkUi(val busy: Boolean = false, val error: String? = null)
+
 /** Stateless, previewable content. Flow: tab → choose → (sound) → trim with preview → create → hear → send / save. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AudioMakerContent(
     ui: AudioMakerUi,
     engineState: EngineState,
-    capsWarning: String?,
     progress: String?,
+    link: LinkUi,
     onBack: () -> Unit,
-    onLink: () -> Unit,
-    onRetry: () -> Unit,
+    onPair: (String) -> Unit,
+    onLogout: () -> Unit,
     onTab: (VisualKind) -> Unit,
     onPickVisual: () -> Unit,
     onPickAudio: () -> Unit,
@@ -150,7 +161,7 @@ fun AudioMakerContent(
     onSave: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val ready = engineState == EngineState.Ready
+    val ready = engineState is EngineState.Linked
     var playing by remember(ui.visual, ui.audio) { mutableStateOf(false) }
     var moreOptions by remember { mutableStateOf(false) }
     Scaffold(
@@ -166,8 +177,7 @@ fun AudioMakerContent(
             Modifier.padding(pad).padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (!ready) EngineCard(engineState, onLink = onLink, onRetry = onRetry)
-            capsWarning?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            if (!ready) LinkCard(engineState, link, onPair)
 
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 VisualKind.entries.forEachIndexed { i, k ->
@@ -243,7 +253,7 @@ fun AudioMakerContent(
             // ---- 2/3. Create and send
             HorizontalDivider()
             Step(if (ui.tab == VisualKind.Video) 2 else 3, "Create and send")
-            Button(onClick = onCreate, enabled = ui.canCreate && ready && ui.result == null, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = onCreate, enabled = ui.canCreate && ui.result == null, modifier = Modifier.fillMaxWidth()) {
                 Text(
                     when {
                         ui.busy && ui.result == null -> "Creating…"
@@ -283,7 +293,10 @@ fun AudioMakerContent(
                     Text("Crop to fill the square", Modifier.weight(1f))
                     Switch(checked = ui.crop, onCheckedChange = onCropChange)
                 }
-                if (ready) TextButton(onClick = onLink) { Text("Show WhatsApp Web") }
+                if (engineState is EngineState.Linked) {
+                    Text("Linked to +${engineState.phone}", style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = onLogout) { Text("Unlink this app from WhatsApp") }
+                }
             }
             Spacer(Modifier.size(24.dp))
         }
@@ -333,27 +346,48 @@ private fun TapToHearSticker(r: MadeSticker, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun EngineCard(state: EngineState, onLink: () -> Unit, onRetry: () -> Unit) {
-    val (title, body) = when (state) {
-        EngineState.Starting -> "Starting…" to "Downloading the sticker engine."
-        is EngineState.NotReady -> "WhatsApp not linked" to
-            "Link one time: push \"Link WhatsApp\", then on that page select \"Link with phone number instead\" " +
-            "and type the code in WhatsApp → Settings → Linked devices. (${state.detail})"
-        EngineState.Ready -> "WhatsApp linked" to
-            "Ready. This uses WhatsApp Web, which is not an official API: send stickers by hand only, never in bulk."
-    }
-    Card(
-        colors = if (state == EngineState.Ready) CardDefaults.cardColors() else
-            CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-    ) {
-        Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall)
-            Text(body, style = MaterialTheme.typography.bodySmall)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (state != EngineState.Ready) OutlinedButton(onClick = onLink) { Text("Link WhatsApp") }
-                if (state != EngineState.Ready) TextButton(onClick = onRetry) { Text("Reload") }
-                if (state == EngineState.Ready) TextButton(onClick = onLink) { Text("Show WhatsApp Web") }
+private fun LinkCard(state: EngineState, link: LinkUi, onPair: (String) -> Unit) {
+    var phone by rememberSaveable { mutableStateOf("") }
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+        Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            when (state) {
+                EngineState.Starting, EngineState.Connecting -> {
+                    Text("Connecting to WhatsApp…", style = MaterialTheme.typography.titleSmall)
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+                is EngineState.Pairing -> {
+                    Text("Type this code in WhatsApp", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        state.code.chunked(4).joinToString("-"),
+                        style = MaterialTheme.typography.displaySmall, fontFamily = FontFamily.Monospace,
+                    )
+                    Text(
+                        "WhatsApp shows a notification: tap it and enter the code. Or open WhatsApp → Settings → " +
+                            "Linked devices → Link a device → Link with phone number instead.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                else -> {
+                    Text("Link WhatsApp (one time)", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        "To send audio stickers, this app becomes a linked device of your WhatsApp, like WhatsApp Web. " +
+                            "This is not an official WhatsApp API: use it by hand only, never for bulk messages. " +
+                            "Test with a second number first if you can.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    OutlinedTextField(
+                        phone, { phone = it.filter { c -> c.isDigit() || c == '+' } },
+                        label = { Text("Your number with country code, e.g. +91 98765 43210") },
+                        singleLine = true, modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    )
+                    Button(onClick = { onPair(phone) }, enabled = !link.busy && phone.count { it.isDigit() } >= 8) {
+                        Text(if (link.busy) "Getting code…" else "Get link code")
+                    }
+                    if (state is EngineState.Failed) Text(state.reason, color = MaterialTheme.colorScheme.error)
+                }
             }
+            link.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
     }
 }

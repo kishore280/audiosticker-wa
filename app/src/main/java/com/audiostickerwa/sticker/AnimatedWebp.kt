@@ -34,20 +34,24 @@ object AnimatedWebp {
 
     // ------------------------------------------------------------ frame extraction
 
-    fun fromVideo(ctx: Context, uri: Uri): Frames? {
+    fun fromVideo(
+        ctx: Context, uri: Uri, startMs: Long = 0, maxMs: Long = MAX_DURATION_MS, crop: Boolean = false,
+        maxFrames: Int = MAX_FRAMES, onProgress: (Float) -> Unit = {},
+    ): Frames? {
         val r = MediaMetadataRetriever()
         try {
             r.setDataSource(ctx, uri)
             val durMs = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: return null
-            val useMs = durMs.coerceIn(1, MAX_DURATION_MS)
-            val count = ((useMs * MAX_FPS) / 1000).toInt().coerceIn(1, MAX_FRAMES)
+            val useMs = (durMs - startMs).coerceIn(1, maxMs)
+            val count = ((useMs * MAX_FPS) / 1000).toInt().coerceIn(1, maxFrames)
             val step = useMs / count
             val out = ArrayList<Bitmap>(count)
             for (i in 0 until count) {
-                val us = (i * step + step / 2) * 1000
+                val us = (startMs + i * step + step / 2) * 1000
                 val f = r.getFrameAtTime(us, MediaMetadataRetriever.OPTION_CLOSEST) ?: continue
-                out.add(scaleToFit(f))
+                out.add(scale(f, crop))
                 f.recycle()
+                onProgress((i + 1f) / count)
             }
             if (out.isEmpty()) return null
             return Frames(out, maxOf(8, (useMs / out.size).toInt()))
@@ -59,13 +63,13 @@ object AnimatedWebp {
     }
 
     @Suppress("DEPRECATION")
-    fun fromGif(ctx: Context, uri: Uri): Frames? {
+    fun fromGif(ctx: Context, uri: Uri, crop: Boolean = false, maxFrames: Int = MAX_FRAMES): Frames? {
         val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
         val movie = Movie.decodeByteArray(bytes, 0, bytes.size) ?: return null
         if (movie.width() <= 0 || movie.height() <= 0) return null
         val dur = movie.duration().toLong().let { if (it <= 0) 1000L else it }
         val useMs = dur.coerceAtMost(MAX_DURATION_MS)
-        val count = ((useMs * MAX_FPS) / 1000).toInt().coerceIn(1, MAX_FRAMES)
+        val count = ((useMs * MAX_FPS) / 1000).toInt().coerceIn(1, maxFrames)
         val step = useMs / count
         val full = Bitmap.createBitmap(movie.width(), movie.height(), Bitmap.Config.ARGB_8888)
         val c = Canvas(full)
@@ -74,18 +78,38 @@ object AnimatedWebp {
             full.eraseColor(Color.TRANSPARENT)
             movie.setTime((i * step).toInt())
             movie.draw(c, 0f, 0f)
-            out.add(scaleToFit(full))
+            out.add(scale(full, crop))
         }
         full.recycle()
         return Frames(out, maxOf(8, (useMs / count).toInt()))
     }
 
-    /** Scale so the longer side is 512; aspect ratio kept. Letterbox is added at encode time. */
-    private fun scaleToFit(src: Bitmap): Bitmap {
-        val s = minOf(SIZE.toFloat() / src.width, SIZE.toFloat() / src.height)
+    /**
+     * fit: the longer side becomes 512 (letterbox is added at encode time).
+     * crop: the shorter side becomes 512 and the centre 512x512 is kept.
+     */
+    fun scale(src: Bitmap, crop: Boolean = false): Bitmap {
+        val s = if (crop) maxOf(SIZE.toFloat() / src.width, SIZE.toFloat() / src.height)
+        else minOf(SIZE.toFloat() / src.width, SIZE.toFloat() / src.height)
         val w = (src.width * s).toInt().coerceAtLeast(1)
         val h = (src.height * s).toInt().coerceAtLeast(1)
-        return Bitmap.createScaledBitmap(src, w, h, true)
+        val scaled = Bitmap.createScaledBitmap(src, w, h, true)
+        if (!crop || (w <= SIZE && h <= SIZE)) return scaled
+        val out = Bitmap.createBitmap(scaled, (w - minOf(w, SIZE)) / 2, (h - minOf(h, SIZE)) / 2, minOf(w, SIZE), minOf(h, SIZE))
+        if (out !== scaled) scaled.recycle()
+        return out
+    }
+
+    /**
+     * WhatsApp sticker metadata: a big-endian TIFF block with one tag 0x5741 ("WA") that holds UTF-8 JSON
+     * (sticker-pack-id, emojis, and for sound stickers "sound-sha256" = base64 SHA-256 of the Ogg file).
+     */
+    fun whatsAppExif(json: String): ByteArray {
+        val js = json.toByteArray(Charsets.UTF_8)
+        val b = java.nio.ByteBuffer.allocate(26 + js.size).order(java.nio.ByteOrder.BIG_ENDIAN)
+        b.put(byteArrayOf(0x4d, 0x4d, 0x00, 0x2a)).putInt(8).putShort(1).putShort(0x5741.toShort())
+            .putShort(7).putInt(js.size).putInt(26).putInt(0).put(js)
+        return b.array()
     }
 
     // ------------------------------------------------------------ encode
@@ -94,21 +118,21 @@ object AnimatedWebp {
      * Tries quality and frame-rate steps until the file is < 500 KB.
      * Returns null when no step fits.
      */
-    fun encodeToFit(frames: Frames): ByteArray? {
+    fun encodeToFit(frames: Frames, maxBytes: Int = MAX_BYTES, exif: ByteArray? = null): ByteArray? {
         val qualities = intArrayOf(75, 60, 45, 30, 20)
         val skips = intArrayOf(1, 2, 3)  // keep every n-th frame
         for (skip in skips) {
             val picked = frames.bitmaps.filterIndexed { i, _ -> i % skip == 0 }
             val ms = frames.frameMs * skip
             for (q in qualities) {
-                val data = encode(picked, ms, q)
-                if (data.size < MAX_BYTES) return data
+                val data = encode(picked, ms, q, exif)
+                if (data.size < maxBytes) return data
             }
         }
         return null
     }
 
-    fun encode(frames: List<Bitmap>, frameMs: Int, quality: Int): ByteArray {
+    fun encode(frames: List<Bitmap>, frameMs: Int, quality: Int, exif: ByteArray? = null): ByteArray {
         val canvasBmp = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(canvasBmp)
         val paint = Paint(Paint.FILTER_BITMAP_FLAG)
@@ -120,8 +144,12 @@ object AnimatedWebp {
             compressStill(canvasBmp, quality)
         }
         canvasBmp.recycle()
-        return mux(stills.map { frameChunks(it) }, frameMs)
+        return muxStills(stills, frameMs, exif)
     }
+
+    /** Still 512x512 WebP files -> one animated WebP. Pure bytes (no Android classes): unit-tested. */
+    fun muxStills(stills: List<ByteArray>, frameMs: Int, exif: ByteArray? = null): ByteArray =
+        mux(stills.map { frameChunks(it) }, frameMs, exif)
 
     @Suppress("DEPRECATION")
     private fun compressStill(b: Bitmap, q: Int): ByteArray {
@@ -146,12 +174,12 @@ object AnimatedWebp {
         return out.toByteArray()
     }
 
-    private fun mux(frames: List<ByteArray>, frameMs: Int): ByteArray {
+    private fun mux(frames: List<ByteArray>, frameMs: Int, exif: ByteArray? = null): ByteArray {
         val body = ByteArrayOutputStream()
         body.write("WEBP".toByteArray())
-        // VP8X: flags = animation (0x02) | alpha (0x10)
+        // VP8X: flags = animation (0x02) | alpha (0x10) | EXIF (0x08)
         chunk(body, "VP8X", ByteArray(10).also {
-            it[0] = 0x12
+            it[0] = (0x12 or (if (exif != null) 0x08 else 0)).toByte()
             put24(it, 4, SIZE - 1); put24(it, 7, SIZE - 1)
         })
         // ANIM: background = transparent, loop = 0 (forever)
@@ -165,6 +193,7 @@ object AnimatedWebp {
             hdr[15] = 0x02                                       // no blend, no dispose
             chunk(body, "ANMF", hdr + f)
         }
+        if (exif != null) chunk(body, "EXIF", exif)
         val b = body.toByteArray()
         val out = ByteArrayOutputStream(b.size + 8)
         out.write("RIFF".toByteArray())

@@ -43,11 +43,20 @@ dependencies {
     implementation(bom)
     implementation("androidx.core:core-ktx:1.16.0")
     implementation("androidx.activity:activity-compose:1.10.1")
-    implementation("androidx.webkit:webkit:1.14.0")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material:material-icons-core")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // WhatsApp engine (whatsmeow via gomobile). Rebuild with engine/build.sh.
+    implementation(files("libs/waengine.aar"))
+    testImplementation("junit:junit:4.13.2")
+}
+
+// Optional: real Opus packets for OggOpusTest (see test). Run with -Popus.packets=... -Popus.out=...
+tasks.withType<Test>().configureEach {
+    project.findProperty("opus.packets")?.let { systemProperty("opus.packets", it) }
+    project.findProperty("opus.out")?.let { systemProperty("opus.out", it) }
+    project.findProperty("webp.dir")?.let { systemProperty("webp.dir", it) }
 }

@@ -35,8 +35,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.audiostickerwa.audio.AudioMakerScreen
 import com.audiostickerwa.audio.AudioMakerState
-import com.audiostickerwa.audio.WaEngine
-import com.audiostickerwa.audio.WaWebHost
+import com.audiostickerwa.audio.StickerEngine
 import com.audiostickerwa.sticker.StickerPack
 import com.audiostickerwa.sticker.WhatsApp
 import com.audiostickerwa.ui.PackDetailContent
@@ -61,14 +60,12 @@ class MainActivity : ComponentActivity() {
 private fun App(vm: PacksViewModel = viewModel()) {
     val context = LocalContext.current
     var screen by rememberSaveable { mutableStateOf("list") }
-    var showWeb by rememberSaveable { mutableStateOf(false) }
-
-    // The WhatsApp Web engine lives as long as the app UI, so the session stays linked between screens.
-    val engine = remember { WaEngine(context) }
+    // The WhatsApp engine lives as long as the app UI, so it stays connected between screens.
+    val engine = remember { StickerEngine(context.applicationContext) }
     // Create/send belong to the same owner as the engine, so leaving the audio screen does not cancel a send.
     val appScope = rememberCoroutineScope()
     val maker = remember(engine) { AudioMakerState(context.applicationContext, engine, appScope) }
-    DisposableEffect(engine) { onDispose { engine.destroy() } }
+    DisposableEffect(engine) { onDispose { engine.close() } }
     LaunchedEffect(engine) { engine.start() }
 
     Box(Modifier.fillMaxSize()) {
@@ -77,13 +74,11 @@ private fun App(vm: PacksViewModel = viewModel()) {
                 engine = engine,
                 maker = maker,
                 onBack = { screen = "list" },
-                onShowWhatsAppWeb = { showWeb = true },
             )
-            BackHandler(enabled = !showWeb) { screen = "list" }
+            BackHandler { screen = "list" }
         } else {
             PackScreens(vm, screen, onNavigate = { screen = it })
         }
-        WaWebHost(engine, visible = showWeb, onClose = { showWeb = false }, modifier = Modifier.safeDrawingPadding())
     }
 }
 

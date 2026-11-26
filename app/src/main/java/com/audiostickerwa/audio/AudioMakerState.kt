@@ -5,7 +5,6 @@ import android.graphics.Movie
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
-import android.util.Base64
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -14,7 +13,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import java.io.File
 
 enum class VisualKind { Video, Gif, Image }
@@ -45,19 +43,21 @@ data class MadeSticker(val webp: File, val ogg: File, val webpBytes: Int, val og
 /**
  * Plain UI state holder for the audio sticker maker. It owns the user's choices and the last result.
  *
- * It lives in the App composition next to [WaEngine], and [scope] is that composition's scope:
+ * It lives in the App composition next to [StickerEngine], and [scope] is that composition's scope:
  * a create or send continues when the user leaves the audio screen, and stops only when the app UI goes.
  */
 @Stable
 class AudioMakerState(
     private val context: Context,
-    private val engine: WaEngine,
+    private val engine: StickerEngine,
     private val scope: CoroutineScope,
 ) {
     var visual by mutableStateOf<Media?>(null); private set
     var visualKind by mutableStateOf(VisualKind.Video); private set
     var tab by mutableStateOf(VisualKind.Video); private set
     var saved by mutableStateOf<String?>(null); private set
+    /** Short text while busy (create/send steps). */
+    var progress by mutableStateOf<String?>(null); private set
     var audio by mutableStateOf<Media?>(null); private set
     /** Trim range in ms on the timed source (separate audio if set, else the video). */
     var range by mutableStateOf(0f..0f); private set
@@ -145,50 +145,33 @@ class AudioMakerState(
         val v = visual ?: return
         busy = true; error = null; lastSent = null; saved = null
         try {
-            val startS = range.start / 1000.0
-            val lenS = (range.endInclusive - range.start) / 1000.0
-            val a = audio
-            val vis = JSONObject()
-                .put("url", engine.shareFile(v.uri, v.mime)).put("mime", v.mime).put("name", fileName(v.mime))
-                .put("kind", when (visualKind) { VisualKind.Video -> "video"; VisualKind.Gif -> "gif"; VisualKind.Image -> "image" })
-            when {
-                visualKind == VisualKind.Image -> Unit
-                visualKind == VisualKind.Gif -> vis.put("start", 0).put("dur", v.durationMs / 1000.0)
-                a == null -> vis.put("start", startS).put("dur", lenS)
-                // Video + other audio: video from 0, as long as the audio (it loops if shorter).
-                else -> vis.put("start", 0).put("dur", minOf(v.durationMs / 1000.0, lenS))
-            }
-            val opts = JSONObject().put("visual", vis)
-                .put("crop", crop)
-            if (a != null) {
-                opts.put("audio", JSONObject().put("url", engine.shareFile(a.uri, a.mime)).put("mime", a.mime)
-                    .put("name", fileName(a.mime)).put("start", startS).put("dur", lenS))
-            }
-            val r = engine.call("__app.make($opts)") as JSONObject
-            result = withContext(Dispatchers.IO) {
-                val dir = File(context.cacheDir, "made").apply { mkdirs() }
-                val webp = File(dir, "sticker.webp").apply { writeBytes(Base64.decode(r.getString("webp"), Base64.DEFAULT)) }
-                val ogg = File(dir, "sticker.ogg").apply { writeBytes(Base64.decode(r.getString("ogg"), Base64.DEFAULT)) }
-                MadeSticker(webp, ogg, r.getInt("webpBytes"), r.getInt("oggBytes"), r.optInt("seconds"), System.currentTimeMillis())
+            val spec = SoundStickerSpec(
+                visual = v, kind = visualKind, audio = audio,
+                startMs = range.start.toLong(), durMs = (range.endInclusive - range.start).toLong(), crop = crop,
+            )
+            result = withContext(Dispatchers.Default) {
+                SoundStickerMaker.make(context, spec) { p -> progress = p }
             }
         } catch (e: Exception) {
             error = e.message ?: e.toString()
         } finally {
             busy = false
-            engine.clearProgress()
+            progress = null
         }
     }
 
     private suspend fun doSend(chat: WaChat) {
+        val r = result ?: return
         busy = true; error = null
+        progress = "Sending…"
         try {
-            val title = engine.call("__app.send(${JSONObject.quote(chat.id)})") as? String ?: chat.title
-            lastSent = "Sent to $title ✓  Open WhatsApp to forward it anywhere."
+            engine.send(chat.id, r)
+            lastSent = "Sent to ${chat.title} ✓  Open WhatsApp to forward it anywhere."
         } catch (e: Exception) {
             error = e.message ?: e.toString()
         } finally {
             busy = false
-            engine.clearProgress()
+            progress = null
         }
     }
 
@@ -212,7 +195,6 @@ class AudioMakerState(
         }
     } catch (e: Exception) { null } ?: (uri.lastPathSegment ?: "file")
 
-    private fun fileName(mime: String) = "media." + (mime.substringAfter('/').substringBefore(';').ifEmpty { "bin" })
 
     companion object {
         const val DEFAULT_LEN_MS = 5000f
