@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 13+ themed icon: speaker and sound waves only (one colour). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:translateX="2" android:scaleX="1" android:scaleY="1">
+        <path android:fillColor="#FF000000"
+            android:pathData="M37,49H43L51,42V66L43,59H37A2,2 0,0 1,35 57V51A2,2 0,0 1,37 49Z" />
+        <path android:strokeColor="#FF000000" android:strokeWidth="3.4" android:strokeLineCap="round"
+            android:pathData="M56,49A7,7 0,0 1,56 59" />
+        <path android:strokeColor="#FF000000" android:strokeWidth="3.4" android:strokeLineCap="round"
+            android:pathData="M60.5,44A13.5,13.5 0,0 1,60.5 64" />
+    </group>
+</vector>

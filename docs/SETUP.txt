@@ -1,0 +1,144 @@
+STICKER STUDIO — SETUP CHECKLIST
+================================
+Repository : https://github.com/kishore280/audiosticker-wa  (public)
+App name   : Sticker Studio
+Package    : com.kish.wastickers
+Version    : 1.0.0 (versionCode 10000)  — set in app/build.gradle.kts → appVersion
+Android    : min 7.0 (API 24), target 36; arm64 only. Audio stickers need Android 10+.
+Category   : Android manifest appCategory = "social". Google Play category (later) = "Communication".
+
+Do the steps in this order. Each step says where to click and what to type.
+Secret VALUES are NOT in this file. They are in the private file SECRETS.txt (sent to the owner only).
+NEVER commit SECRETS.txt, KEYSTORE_BASE64.txt or wastickers-release.jks to the repository.
+
+
+STEP 1 — Back up the release key (owner, 2 minutes)
+---------------------------------------------------
+1. Save these 3 files in a password manager or a private backup:
+   wastickers-release.jks, KEYSTORE_BASE64.txt, SECRETS.txt
+2. Reason: every update must be signed with this key. If the key is lost, users must uninstall
+   the app before they can install a new version.
+
+
+STEP 2 — Rename the default branch to "main" (recommended)
+----------------------------------------------------------
+Now the default branch is "claude/eager-albattani-rb7dtd".
+1. GitHub → repository → Settings → General → Default branch → click the rename (pencil) icon.
+2. Type: main   → Rename branch.
+3. Local clones: git branch -m claude/eager-albattani-rb7dtd main && git fetch origin && git branch -u origin/main main
+
+
+STEP 3 — Add the 4 Actions secrets
+----------------------------------
+GitHub → Settings → Secrets and variables → Actions → "New repository secret". Add:
+   Name                Value
+   KEYSTORE_BASE64     the full text of KEYSTORE_BASE64.txt (one long line)
+   KEYSTORE_PASSWORD   from SECRETS.txt
+   KEY_ALIAS           wastickers
+   KEY_PASSWORD        from SECRETS.txt (same as KEYSTORE_PASSWORD)
+
+
+STEP 4 — Actions settings
+-------------------------
+GitHub → Settings → Actions → General:
+1. "Actions permissions": Allow all actions and reusable workflows
+   (the workflows use actions/checkout, actions/setup-java, gradle/actions/setup-gradle,
+   softprops/action-gh-release).
+2. "Workflow permissions": Read and write permissions → Save.
+   (The Release workflow creates the GitHub Release and uploads the APK.)
+
+
+STEP 5 — Publish release v1.0.0
+-------------------------------
+1. GitHub → Actions → "Release" → "Run workflow" → branch: main (or the default branch) → Run.
+   The workflow reads appVersion (1.0.0), builds, runs unit tests, signs, and creates the
+   release "Sticker Studio 1.0.0" with tag v1.0.0. Notes come from CHANGELOG.md.
+2. Check: Releases → v1.0.0 has StickerStudio-1.0.0.apk and StickerStudio-1.0.0.apk.sha256.
+3. On a phone: install the APK → open Sticker Studio → Settings (gear) → "Check for updates"
+   → it must say "You have the latest version".
+If the workflow fails at "Release key": a secret is missing or has a wrong name (Step 3).
+
+
+STEP 6 — Repository "About" box and look
+----------------------------------------
+GitHub → repository main page → About (gear icon):
+   Description : Make WhatsApp stickers with sound on Android. Video, GIF or photo + any sound. Sticker packs too. Free and open source.
+   Website     : https://github.com/kishore280/audiosticker-wa/releases/latest
+   Topics      : android, whatsapp, whatsapp-stickers, stickers, audio-stickers, sound-stickers,
+                 sticker-maker, kotlin, jetpack-compose, whatsmeow, open-source
+   Check "Releases", uncheck "Packages" and "Deployments".
+GitHub → Settings → General → Social preview → Upload docs/social-preview-1280x640.png
+
+
+STEP 7 — Screenshots for the README and launch posts (owner)
+------------------------------------------------------------
+1. Take 3–5 phone screenshots with NO personal chats, faces or phone numbers:
+   home screen, audio sticker maker (square preview), result card, a sticker pack, Settings.
+2. Put them in docs/screenshots/ (home.png, maker.png, result.png, pack.png).
+3. In README.md, find the HTML comment "Screenshots:" and replace it with the <p> line
+   that it shows (it lists the files).
+4. For Product Hunt, also make 1270×760 images (screenshot on a coloured background).
+
+
+STEP 8 — Product Hunt listing (copy and paste)
+----------------------------------------------
+Name        : Sticker Studio
+Tagline     : WhatsApp stickers with sound, made on your phone      (≤ 60 characters)
+Thumbnail   : docs/producthunt-thumbnail-240.png
+Gallery     : docs/social-preview-1280x640.png + the screenshots from Step 7
+Links       : https://github.com/kishore280/audiosticker-wa
+              https://github.com/kishore280/audiosticker-wa/releases/latest
+Topics      : Android, Messaging, Open Source, Design Tools
+Pricing     : Free
+Description (≤ 260 characters):
+  Turn any video, GIF or photo into a WhatsApp sticker that plays a sound when tapped. Trim it,
+  choose the square, send it to any chat, and keep a library to resend. Also makes still and
+  animated sticker packs. Free, open source, no ads.
+First comment (maker comment):
+  Hi! WhatsApp added stickers with sound, but you can only make them in a few places. Sticker
+  Studio makes them on Android: pick a video (or a GIF/photo + any sound), trim, choose Fit or a
+  movable square, and send. Everything is converted on the phone (MediaCodec → animated WebP +
+  Opus). Sending uses a linked-device connection (whatsmeow), because WhatsApp has no public
+  API for sound stickers — so please use it by hand, not for bulk messages. Sticker packs use
+  the official sticker API. Feedback and PRs welcome!
+
+
+STEP 9 — Forum posts (Reddit r/androidapps, XDA, etc.)
+------------------------------------------------------
+Title: [Open source] Sticker Studio — make WhatsApp stickers with sound on Android
+Body : use the Product Hunt description + the 3 "How to make an audio sticker" steps from the
+       README + the download link + the risk note from the README ("Important: risk").
+Rules: read each forum's self-promotion rules first; say clearly that you are the developer.
+
+
+STEP 10 — Each new version (later)
+----------------------------------
+1. app/build.gradle.kts → appVersion = "1.1.0"
+2. CHANGELOG.md → add "## [1.1.0] - YYYY-MM-DD" with the changes (this becomes the release notes).
+3. Commit and push to main, then: Actions → Release → Run workflow
+   (or push a tag: git tag v1.1.0 && git push origin v1.1.0 — the tag must equal "v" + appVersion).
+4. Users see "Update available" on the home screen of the app.
+
+
+STEP 11 — Google Play (optional, later)
+---------------------------------------
+- Play needs an .aab (./gradlew bundleRelease) and Play App Signing; use the same upload key or a new upload key.
+- Assets ready: docs/icon-512.png (512×512 icon), docs/feature-graphic-1024x500.png.
+- Category: Communication. Add the word "WAStickerApps" to the description (WhatsApp's sticker-app search).
+- Do NOT use "WhatsApp" in the app name. Mention it only in the description.
+- Risk: Google Play can reject apps that connect to WhatsApp with an unofficial client
+  (the audio-sticker sending). Sticker packs alone follow the official WhatsApp sticker API.
+- Data safety form: no data collected or shared; network use = WhatsApp linked device + GitHub update check.
+
+
+FILES THAT ARE READY IN THE REPOSITORY
+--------------------------------------
+docs/icon.svg                        master icon (vector)
+docs/icon-512.png                    store icon 512×512
+docs/producthunt-thumbnail-240.png   Product Hunt thumbnail
+docs/icon-192-round.png              round icon (README / web)
+docs/social-preview-1280x640.png     GitHub social preview / Product Hunt gallery
+docs/feature-graphic-1024x500.png    Google Play feature graphic
+.github/workflows/release.yml        signed release + APK upload
+.github/workflows/ci.yml             build + unit tests on push / pull request
+CHANGELOG.md, LICENSE (MIT), README.md

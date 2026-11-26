@@ -1,3 +1,5 @@
+<p align="center"><img src="docs/icon-192-round.png" width="120" alt="Sticker Studio icon"></p>
+
 <h1 align="center">Sticker Studio</h1>
 
 <p align="center">
@@ -31,10 +33,11 @@
 - **Send** to any chat. One tap for *Me* and your recent chats.
 - **My audio stickers:** every sticker that you make is saved. Hear it, send it again, export it (`.webp` + `.ogg`), or delete it.
 - Your **pack name and publisher** show in the sticker info in WhatsApp.
-- **Share** a video, GIF, image or sound from any app → *Make audio sticker*.
+- **Share** a video, GIF, image or sound from any app to Sticker Studio → choose *Audio sticker*, one of your packs, or *New pack*.
 
 ### 🗂️ Sticker packs (no link needed)
 - **Still packs** from photos, and **animated packs** from videos and GIFs (trim, Fit / Fill, move).
+- Share several photos from your gallery straight into a pack.
 - Numbered slots 1–30, tray icon, 1–3 emojis per sticker.
 - **Add to WhatsApp**, then **Add changes to WhatsApp** after you edit the pack.
 - Works with WhatsApp and WhatsApp Business.

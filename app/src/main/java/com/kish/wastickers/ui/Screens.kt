@@ -220,10 +220,16 @@ private fun PackRow(pack: StickerPack, isAdded: Boolean, fileOf: (String) -> Fil
     }
 }
 
+/** New pack: name, publisher, still or animated. */
 @Composable
-private fun CreatePackDialog(defaultPublisher: String, onDismiss: () -> Unit, onCreate: (String, String, Boolean) -> Unit) {
+fun CreatePackDialog(
+    defaultPublisher: String,
+    onDismiss: () -> Unit,
+    onCreate: (String, String, Boolean) -> Unit,
+    initialAnimated: Boolean = true,
+) {
     var name by rememberSaveable { mutableStateOf("") }
-    var animated by rememberSaveable { mutableStateOf(true) }
+    var animated by rememberSaveable { mutableStateOf(initialAnimated) }
     var publisher by rememberSaveable { mutableStateOf(defaultPublisher) }
     AlertDialog(
         onDismissRequest = onDismiss,

@@ -50,7 +50,8 @@ object VideoFrameReader {
         try {
             dec.configure(fmt, null, null, 0)
         } catch (e: Exception) {
-            // Some decoders refuse the HDR request: try again without it.
+            // Some decoders refuse the HDR request (Android 13+ only): try again without it.
+            if (Build.VERSION.SDK_INT < 33) throw e
             fmt.removeKey(MediaFormat.KEY_COLOR_TRANSFER_REQUEST)
             dec.reset()
             dec.configure(fmt, null, null, 0)

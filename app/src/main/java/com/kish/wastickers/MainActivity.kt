@@ -47,6 +47,10 @@ import com.kish.wastickers.ui.ClipEditorDialog
 import com.kish.wastickers.ui.WhatsAppChoiceDialog
 import com.kish.wastickers.ui.status
 import com.kish.wastickers.ui.HomeContent
+import com.kish.wastickers.ui.CreatePackDialog
+import com.kish.wastickers.ui.SharedKind
+import com.kish.wastickers.ui.ShareTarget
+import com.kish.wastickers.ui.ShareTargetSheet
 import com.kish.wastickers.settings.AppSettings
 import com.kish.wastickers.settings.AppUpdate
 import com.kish.wastickers.settings.SettingsSheet
@@ -62,14 +66,21 @@ import com.kish.wastickers.audio.SoundSheet
 import com.kish.wastickers.ui.PacksViewModel
 
 class MainActivity : ComponentActivity() {
-    /** A file shared to the app from another app (ACTION_SEND), until the UI takes it. */
-    private val shared = MutableStateFlow<Uri?>(null)
+    /** Files shared to the app from another app (ACTION_SEND / SEND_MULTIPLE), until the UI takes them. */
+    private val shared = MutableStateFlow<List<Uri>>(emptyList())
 
     private fun takeShared(intent: Intent?) {
-        if (intent?.action != Intent.ACTION_SEND) return
-        val uri = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-        else @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM)
-        if (uri != null) shared.value = uri
+        val uris: List<Uri> = when (intent?.action) {
+            Intent.ACTION_SEND -> listOfNotNull(
+                if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                else @Suppress("DEPRECATION") intent.getParcelableExtra(Intent.EXTRA_STREAM),
+            )
+            Intent.ACTION_SEND_MULTIPLE ->
+                (if (Build.VERSION.SDK_INT >= 33) intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                else @Suppress("DEPRECATION") intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)) ?: emptyList()
+            else -> emptyList()
+        }
+        if (uris.isNotEmpty()) shared.value = uris.take(StickerPack.MAX_STICKERS)
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -85,8 +96,8 @@ class MainActivity : ComponentActivity() {
             val green = Color(0xFF00A884)
             MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme(primary = green) else lightColorScheme(primary = green)) {
                 Surface(Modifier.fillMaxSize()) {
-                    val sharedUri by shared.collectAsStateWithLifecycle()
-                    App(sharedUri = sharedUri, onSharedTaken = { shared.value = null })
+                    val sharedUris by shared.collectAsStateWithLifecycle()
+                    App(sharedUris = sharedUris, onSharedTaken = { shared.value = emptyList() })
                 }
             }
         }
@@ -95,7 +106,7 @@ class MainActivity : ComponentActivity() {
 
 /** Screen keys: "home", "pack:<id>", "audio". */
 @Composable
-private fun App(sharedUri: Uri?, onSharedTaken: () -> Unit, vm: PacksViewModel = viewModel()) {
+private fun App(sharedUris: List<Uri>, onSharedTaken: () -> Unit, vm: PacksViewModel = viewModel()) {
     val context = LocalContext.current
     var screen by rememberSaveable { mutableStateOf("home") }
     val snackbar = remember { SnackbarHostState() }
@@ -119,19 +130,62 @@ private fun App(sharedUri: Uri?, onSharedTaken: () -> Unit, vm: PacksViewModel =
         actions.messageShown()
     }
 
-    // A shared file opens the maker with it selected (a sound goes to the sound; then the user picks a picture).
-    LaunchedEffect(sharedUri) {
-        val uri = sharedUri ?: return@LaunchedEffect
-        val mime = context.contentResolver.getType(uri) ?: ""
-        maker.reset()
-        if (mime.startsWith("audio/")) {
-            maker.selectTab(com.kish.wastickers.audio.VisualKind.Image)
-            maker.setAudio(uri)
-        } else {
-            maker.setVisual(uri)
+    // Shared files: a sound opens the audio maker; a video, GIF or images ask "Use this for…" (audio sticker or a pack).
+    val packsState by vm.state.collectAsStateWithLifecycle()
+    var pendingClip by remember { mutableStateOf<Pair<String, Uri>?>(null) }
+    var newPackFor by remember { mutableStateOf<Pair<SharedKind, List<Uri>>?>(null) }
+    val sharedKind = remember(sharedUris) {
+        sharedUris.firstOrNull()?.let { u ->
+            val mime = context.contentResolver.getType(u) ?: ""
+            when {
+                mime.startsWith("audio/") -> SharedKind.Audio
+                mime.startsWith("video/") -> SharedKind.Video
+                mime == "image/gif" -> SharedKind.Gif
+                else -> SharedKind.Image
+            }
         }
-        screen = "audio"
-        onSharedTaken()
+    }
+    LaunchedEffect(sharedKind, sharedUris) {
+        if (sharedKind == SharedKind.Audio) {
+            maker.reset()
+            maker.selectTab(com.kish.wastickers.audio.VisualKind.Image)
+            maker.setAudio(sharedUris.first())
+            screen = "audio"
+            onSharedTaken()
+        }
+    }
+    fun sendToPack(kind: SharedKind, uris: List<Uri>, packId: String) {
+        if (kind == SharedKind.Video || kind == SharedKind.Gif) pendingClip = packId to uris.first()
+        else vm.addImages(packId, uris)
+        screen = "pack:$packId"
+    }
+    if (sharedKind != null && sharedKind != SharedKind.Audio) {
+        val uris = sharedUris
+        ShareTargetSheet(
+            kind = sharedKind,
+            count = uris.size,
+            packs = packsState.packs,
+            onPick = { t ->
+                onSharedTaken()
+                when (t) {
+                    ShareTarget.AudioSticker -> { maker.reset(); maker.setVisual(uris.first()); screen = "audio" }
+                    is ShareTarget.Pack -> sendToPack(sharedKind, uris, t.id)
+                    ShareTarget.NewPack -> newPackFor = sharedKind to uris
+                }
+            },
+            onDismiss = onSharedTaken,
+        )
+    }
+    newPackFor?.let { (kind, uris) ->
+        CreatePackDialog(
+            defaultPublisher = settings.names.value.publisher,
+            initialAnimated = kind != SharedKind.Image,
+            onDismiss = { newPackFor = null },
+            onCreate = { n, p, a ->
+                newPackFor = null
+                vm.createPack(n, p, a) { id -> sendToPack(kind, uris, id) }
+            },
+        )
     }
 
     val engineState by engine.state.collectAsStateWithLifecycle()
@@ -163,6 +217,7 @@ private fun App(sharedUri: Uri?, onSharedTaken: () -> Unit, vm: PacksViewModel =
         }
         else -> PackScreens(
             vm, screen, onNavigate = { screen = it }, snackbar = snackbar,
+            pendingClip = pendingClip, onPendingClipTaken = { pendingClip = null },
             sounds = sounds,
             linkedPhone = (engineState as? EngineState.Linked)?.phone,
             onNewAudioSticker = { maker.reset(); screen = "audio" },
@@ -209,6 +264,8 @@ private fun PackScreens(
     screen: String,
     onNavigate: (String) -> Unit,
     snackbar: SnackbarHostState,
+    pendingClip: Pair<String, Uri>?,
+    onPendingClipTaken: () -> Unit,
     sounds: List<SavedSound>,
     linkedPhone: String?,
     onNewAudioSticker: () -> Unit,
@@ -237,6 +294,10 @@ private fun PackScreens(
             return
         }
         var clipUri by remember { mutableStateOf<Uri?>(null) }
+        // A video or GIF shared from another app opens the clip editor of this pack.
+        LaunchedEffect(pendingClip) {
+            if (pendingClip?.first == id) { clipUri = pendingClip.second; onPendingClipTaken() }
+        }
         var chooseApp by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
         // Still pack: many images at once. Animated pack: one file; a video or GIF opens the clip editor.
         val pickImages = rememberLauncherForActivityResult(
