@@ -85,7 +85,7 @@ object SoundStickerMaker {
 
     /** An image as a 2-frame animation (WhatsApp sound stickers are animated). */
     private fun stillFrames(ctx: Context, uri: Uri, crop: Boolean): AnimatedWebp.Frames? {
-        val src = ctx.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it) } ?: return null
+        val src = AnimatedWebp.loadImage(ctx, uri, if (crop) 1024 else 512) ?: return null
         val f = AnimatedWebp.scale(src, crop)
         if (f !== src) src.recycle()
         return AnimatedWebp.Frames(listOf(f, f.copy(f.config ?: Bitmap.Config.ARGB_8888, false)), 1000)

@@ -149,9 +149,5 @@ fun ClipPreview(
 /** Dark grey "transparent" background, like an image editor. */
 private val Checker = Color(0xFF2A2D31)
 
-private fun decodeSampled(context: android.content.Context, m: Media, target: Int): ImageBitmap? = try {
-    var sample = 1
-    while (m.width / (sample * 2) >= target && m.height / (sample * 2) >= target) sample *= 2
-    val o = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
-    context.contentResolver.openInputStream(m.uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, o) }?.asImageBitmap()
-} catch (e: Exception) { null }
+private fun decodeSampled(context: android.content.Context, m: Media, target: Int): ImageBitmap? =
+    com.audiostickerwa.sticker.AnimatedWebp.loadImage(context, m.uri, maxOf(target, 512))?.asImageBitmap()

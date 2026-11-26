@@ -55,10 +55,18 @@ object AnimatedWebp {
             val useMs = (durMs - startMs).coerceIn(1, maxMs)
             val count = ((useMs * MAX_FPS) / 1000).toInt().coerceIn(1, maxFrames)
             val step = useMs / count
+            // 1. Decode the clip one time with MediaCodec (fast; 4K / HEVC / HDR / rotation).
+            var lastError: Throwable? = null
+            try {
+                val frames = VideoFrameReader.read(ctx, uri, startMs, useMs, MAX_FPS, maxFrames, crop, SIZE, onProgress)
+                if (frames.isNotEmpty()) return Frames(frames, maxOf(8, (useMs / frames.size).toInt()))
+            } catch (e: Throwable) {
+                lastError = e
+            }
+            // 2. Fallback: MediaMetadataRetriever, one frame at a time.
             // Fit: the frame fits in 512. Fill: the shorter side must still be >= 512 after the cut.
             val bound = if (crop) SIZE * 2 else SIZE
             val out = ArrayList<Bitmap>(count)
-            var lastError: Throwable? = null
             for (i in 0 until count) {
                 val us = (startMs + i * step + step / 2) * 1000
                 val f = try {
@@ -125,6 +133,30 @@ object AnimatedWebp {
         }
         full.recycle()
         return Frames(out, maxOf(8, (useMs / count).toInt()))
+    }
+
+    /**
+     * Loads a picture at about [maxSide] px: large photos (50+ MP, HEIC) do not use much memory, and the
+     * camera rotation (EXIF) is applied. Android 9+: ImageDecoder; older: BitmapFactory with sampling.
+     */
+    fun loadImage(ctx: Context, uri: Uri, maxSide: Int): Bitmap? {
+        if (Build.VERSION.SDK_INT >= 28) {
+            return try {
+                android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(ctx.contentResolver, uri)) { d, info, _ ->
+                    val w = info.size.width; val h = info.size.height
+                    val s = maxSide.toFloat() / maxOf(w, h)
+                    if (s < 1f) d.setTargetSize(maxOf(1, (w * s).toInt()), maxOf(1, (h * s).toInt()))
+                    d.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+                }
+            } catch (e: Exception) { null }
+        }
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        ctx.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+        if (bounds.outWidth <= 0) return null
+        var sample = 1
+        while (bounds.outWidth / (sample * 2) >= maxSide && bounds.outHeight / (sample * 2) >= maxSide) sample *= 2
+        val o = android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }
+        return ctx.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, o) }
     }
 
     /**

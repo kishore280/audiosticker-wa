@@ -134,15 +134,7 @@ class StickerRepository(private val context: Context) {
 
     // ------------------------------------------------------------------ image work
 
-    private fun decode(uri: Uri, maxSide: Int): Bitmap? {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-        var sample = 1
-        while (bounds.outWidth / (sample * 2) >= maxSide && bounds.outHeight / (sample * 2) >= maxSide) sample *= 2
-        val opts = BitmapFactory.Options().apply { inSampleSize = sample }
-        return context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
-    }
+    private fun decode(uri: Uri, maxSide: Int): Bitmap? = AnimatedWebp.loadImage(context, uri, maxSide)
 
     /** Fit the image in a 512x512 transparent square (keeps aspect ratio). */
     private fun fitSquare(src: Bitmap, size: Int): Bitmap {
