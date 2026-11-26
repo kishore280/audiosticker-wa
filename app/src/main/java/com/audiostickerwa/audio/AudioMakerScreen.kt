@@ -5,6 +5,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import android.Manifest
+import android.os.Build
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.text.font.FontFamily
@@ -80,6 +84,8 @@ fun AudioMakerScreen(
     var chatPicker by remember { mutableStateOf<List<WaChat>?>(null) }
     var linkBusy by remember { mutableStateOf(false) }
     var linkError by remember { mutableStateOf<String?>(null) }
+    // The keep-alive notification during linking needs this permission on Android 13+ (linking works without it).
+    val notifPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
     val pickVisual = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) maker.setVisual(uri)
@@ -98,6 +104,7 @@ fun AudioMakerScreen(
         link = LinkUi(busy = linkBusy, error = linkError),
         onBack = onBack,
         onPair = { phone ->
+            if (Build.VERSION.SDK_INT >= 33) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
             scope.launch {
                 linkBusy = true; linkError = null
                 try { engine.pair(phone) } catch (e: Exception) { linkError = e.message ?: e.toString() }
@@ -105,6 +112,7 @@ fun AudioMakerScreen(
             }
         },
         onLogout = { scope.launch { engine.logout() } },
+        onCancelPairing = { scope.launch { engine.cancelPairing() } },
         onTab = maker::selectTab,
         onPickVisual = {
             when (maker.tab) {
@@ -150,6 +158,7 @@ fun AudioMakerContent(
     onBack: () -> Unit,
     onPair: (String) -> Unit,
     onLogout: () -> Unit,
+    onCancelPairing: () -> Unit,
     onTab: (VisualKind) -> Unit,
     onPickVisual: () -> Unit,
     onPickAudio: () -> Unit,
@@ -177,7 +186,7 @@ fun AudioMakerContent(
             Modifier.padding(pad).padding(horizontal = 16.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            if (!ready) LinkCard(engineState, link, onPair)
+            if (!ready) LinkCard(engineState, link, onPair, onCancelPairing)
 
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 VisualKind.entries.forEachIndexed { i, k ->
@@ -346,8 +355,9 @@ private fun TapToHearSticker(r: MadeSticker, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun LinkCard(state: EngineState, link: LinkUi, onPair: (String) -> Unit) {
+private fun LinkCard(state: EngineState, link: LinkUi, onPair: (String) -> Unit, onCancel: () -> Unit) {
     var phone by rememberSaveable { mutableStateOf("") }
+    val clipboard = LocalClipboardManager.current
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
         Column(Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when (state) {
@@ -357,15 +367,17 @@ private fun LinkCard(state: EngineState, link: LinkUi, onPair: (String) -> Unit)
                 }
                 is EngineState.Pairing -> {
                     Text("Type this code in WhatsApp", style = MaterialTheme.typography.titleSmall)
+                    Text(state.code, style = MaterialTheme.typography.displaySmall, fontFamily = FontFamily.Monospace)
                     Text(
-                        state.code.chunked(4).joinToString("-"),
-                        style = MaterialTheme.typography.displaySmall, fontFamily = FontFamily.Monospace,
-                    )
-                    Text(
-                        "WhatsApp shows a notification: tap it and enter the code. Or open WhatsApp → Settings → " +
-                            "Linked devices → Link a device → Link with phone number instead.",
+                        "1. Copy the code.  2. Open WhatsApp → Settings → Linked devices → Link a device → " +
+                            "Link with phone number instead.  3. Type the code.  4. Come back here: this card " +
+                            "changes to \"Linked\". The code expires after about 2 minutes.",
                         style = MaterialTheme.typography.bodySmall,
                     )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { clipboard.setText(AnnotatedString(state.code.replace("-", ""))) }) { Text("Copy code") }
+                        OutlinedButton(onClick = onCancel) { Text("New code") }
+                    }
                 }
                 else -> {
                     Text("Link WhatsApp (one time)", style = MaterialTheme.typography.titleSmall)

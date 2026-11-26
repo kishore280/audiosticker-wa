@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Keeps the WhatsApp engine running while the user links in WhatsApp, and while a sticker is sent. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Android 11+ package visibility: needed to find WhatsApp and query its "is pack added" provider. -->
     <queries>
@@ -27,6 +31,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".audio.EngineService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- WhatsApp reads sticker packs from this provider. -->
         <provider

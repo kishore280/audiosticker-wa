@@ -33,6 +33,7 @@ data class WaChat(val id: String, val title: String, val group: Boolean)
  * The session is kept in files/wa (SQLite).
  */
 class StickerEngine(context: Context) {
+    private val appContext = context.applicationContext
     private val dataDir = File(context.filesDir, "wa").path
     @Volatile private var engine: Engine? = null
 
@@ -41,6 +42,10 @@ class StickerEngine(context: Context) {
 
     private val listener = object : Listener {
         override fun onState(state: String, detail: String) {
+            // Linking ends (linked, or failed): the keep-alive service is no longer needed.
+            if (state == "linked" || state == "loggedout" || (state == "unlinked" && detail.isNotEmpty())) {
+                EngineService.stop(appContext)
+            }
             _state.value = when (state) {
                 "linked" -> EngineState.Linked(detail)
                 "pairing" -> EngineState.Pairing(detail)
@@ -70,8 +75,26 @@ class StickerEngine(context: Context) {
         }
     }
 
-    /** Returns the 8-character code to type in WhatsApp. */
-    suspend fun pair(phone: String): String = io { it.pairPhone(phone) }
+    /**
+     * Returns the code to type in WhatsApp (as "ABCD-EFGH"). A foreground service keeps the app running
+     * while the user is in WhatsApp; it stops when linking ends or after 3 minutes.
+     */
+    suspend fun pair(phone: String): String {
+        EngineService.start(appContext, "Linking WhatsApp… type the code in WhatsApp.", 180_000L)
+        try {
+            return io { it.pairPhone(phone) }
+        } catch (e: Exception) {
+            EngineService.stop(appContext)
+            throw e
+        }
+    }
+
+    /** Stops a link attempt so a new code can be requested. */
+    suspend fun cancelPairing() {
+        EngineService.stop(appContext)
+        runCatching { io { it.disconnect() } }
+        _state.value = EngineState.Unlinked
+    }
 
     suspend fun logout() { runCatching { io { it.logout() } }; _state.value = EngineState.Unlinked }
 
@@ -84,8 +107,14 @@ class StickerEngine(context: Context) {
     }
 
     /** Sends a made sound sticker. Returns the message ID. */
-    suspend fun send(chatId: String, s: MadeSticker): String =
-        io { it.sendSoundSticker(chatId, s.webp.path, s.ogg.path, s.seconds.toLong(), true, "🔊") }
+    suspend fun send(chatId: String, s: MadeSticker): String {
+        EngineService.start(appContext, "Sending sticker…", 120_000L)
+        try {
+            return io { it.sendSoundSticker(chatId, s.webp.path, s.ogg.path, s.seconds.toLong(), true, "🔊") }
+        } finally {
+            EngineService.stop(appContext)
+        }
+    }
 
     fun close() { engine?.disconnect() }
 }
