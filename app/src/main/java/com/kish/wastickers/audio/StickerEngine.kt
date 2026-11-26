@@ -68,6 +68,12 @@ class StickerEngine(context: Context) {
 
     /** Opens the session and connects when the device is already linked. */
     suspend fun start() {
+        // Never linked (no session database): do not load the Go engine at app start. It loads on "Get link code".
+        // The app opens faster, and the sticker features never depend on the engine.
+        if (!File(dataDir, "session.db").exists()) {
+            _state.value = EngineState.Unlinked
+            return
+        }
         try {
             io { e -> if (e.isLinked) e.connect() else _state.value = EngineState.Unlinked }
         } catch (e: Exception) {
